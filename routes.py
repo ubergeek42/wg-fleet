@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -209,6 +210,52 @@ async def ping_client(
         hosts.regenerate_hosts_file(app_config, _session_factory)
 
     return PingResponse(status="ok")
+
+# Jinja2 templates setup
+templates = Jinja2Templates(directory="templates")
+
+@web_router.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    """Fleet list page"""
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "fleets": app_config.fleets.keys()
+    })
+
+@web_router.get("/fleet/{fleet_name}", response_class=HTMLResponse)
+async def fleet_detail(
+    fleet_name: str,
+    request: Request,
+    db: Session = Depends(get_db_session)
+):
+    """Fleet detail page with active clients"""
+    if fleet_name not in app_config.fleets:
+        raise HTTPException(status_code=404, detail="Fleet not found")
+
+    # Get clients from database
+    clients = db.query(Client).filter_by(fleet_id=fleet_name).all()
+
+    # Optionally merge WireGuard stats
+    try:
+        wg_peers = wireguard.list_peers(fleet_name)
+        wg_map = {peer['public_key']: peer for peer in wg_peers}
+
+        for client in clients:
+            if client.public_key in wg_map:
+                peer = wg_map[client.public_key]
+                client.wg_last_handshake = peer['last_handshake']
+                client.wg_rx_bytes = peer.get('rx_bytes', 0)
+                client.wg_tx_bytes = peer.get('tx_bytes', 0)
+            else:
+                client.wg_last_handshake = None
+    except Exception as e:
+        logger.warning(f"Failed to fetch WireGuard stats: {e}")
+
+    return templates.TemplateResponse("fleet.html", {
+        "request": request,
+        "fleet_name": fleet_name,
+        "clients": clients
+    })
 
 def create_app(config, session_factory, engine):
     """

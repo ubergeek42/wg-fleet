@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>wg-fleet - Fleet Manager</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .fleet-list {
+            list-style: none;
+            padding: 0;
+        }
+        .fleet-list li {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .fleet-list a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .fleet-list a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>wg-fleet Manager</h1>
+    <h2>Fleets</h2>
+    <ul class="fleet-list">
+    {% for fleet_name in fleets %}
+        <li><a href="/fleet/{{ fleet_name }}">{{ fleet_name }}</a></li>
+    {% endfor %}
+    </ul>
+</body>
+</html>

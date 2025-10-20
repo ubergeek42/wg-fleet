@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fleet: {{ fleet_name }}</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background: #333;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Fleet: {{ fleet_name }}</h1>
+    <a href="/">← Back to fleet list</a>
+
+    <h2>Active Clients ({{ clients|length }})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Hostname</th>
+                <th>Assigned IP</th>
+                <th>Public Key</th>
+                <th>Source IP</th>
+                <th>Last Seen</th>
+                <th>Last Handshake</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for client in clients %}
+            <tr>
+                <td>{{ client.hostname or '(none)' }}</td>
+                <td>{{ client.assigned_ip }}</td>
+                <td>{{ client.public_key[:16] }}...</td>
+                <td>{{ client.http_request_ip }}</td>
+                <td class="timestamp">{{ client.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td class="timestamp">
+                    {% if client.wg_last_handshake %}
+                        {{ client.wg_last_handshake.strftime('%Y-%m-%d %H:%M:%S') }}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
