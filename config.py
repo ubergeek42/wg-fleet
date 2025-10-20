@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 from datetime import timedelta
 from typing import Dict
+import ipaddress
 
 @dataclass
 class FleetConfig:
@@ -87,11 +88,33 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
             if field not in fleet_data:
                 raise ValueError(f"Fleet '{name}' missing required field: {field}")
 
+        # Validate port type and range
+        port = fleet_data['port']
+        if not isinstance(port, int):
+            raise ValueError(f"Fleet '{name}': port must be an integer")
+        if port < 1 or port > 65535:
+            raise ValueError(f"Fleet '{name}': port must be between 1 and 65535")
+
+        # Validate IPv6 address
+        try:
+            ipaddress.IPv6Address(fleet_data['ip6'])
+        except (ipaddress.AddressValueError, ValueError) as e:
+            raise ValueError(f"Fleet '{name}': invalid IPv6 address '{fleet_data['ip6']}': {e}")
+
+        # Validate IPv6 subnet
+        try:
+            network = ipaddress.IPv6Network(fleet_data['subnet'], strict=False)
+            # Ensure it's actually IPv6
+            if network.version != 6:
+                raise ValueError(f"Fleet '{name}': subnet must be IPv6")
+        except (ipaddress.AddressValueError, ValueError) as e:
+            raise ValueError(f"Fleet '{name}': invalid IPv6 subnet '{fleet_data['subnet']}': {e}")
+
         fleets[name] = FleetConfig(
             ip6=fleet_data['ip6'],
             subnet=fleet_data['subnet'],
             external_ip=fleet_data['external_ip'],
-            port=fleet_data['port']
+            port=port
         )
 
     return Config(
