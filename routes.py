@@ -7,7 +7,7 @@ from typing import Optional
 import ipaddress
 import random
 import re
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 
 from models import Client
@@ -93,7 +93,7 @@ async def register_client(
             assigned_ip=client_ip,
             http_request_ip=request.client.host,
             hostname=None,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         db.add(client_record)
         db.commit()
@@ -163,8 +163,10 @@ async def ping_client(
 
     fleet_config = app_config.fleets[fleet_name]
 
-    # Get client IP
-    client_ip = request.client.host
+    # Get client IP (support X-Forwarded-For for testing and reverse proxies)
+    client_ip = request.headers.get('X-Forwarded-For')
+    if not client_ip:
+        client_ip = request.client.host
 
     # Verify IP is in fleet subnet
     try:
@@ -186,7 +188,7 @@ async def ping_client(
         raise HTTPException(status_code=404, detail="Client not registered")
 
     # Update timestamp
-    client_record.timestamp = datetime.utcnow()
+    client_record.timestamp = datetime.now(UTC)
 
     # Handle hostname if provided
     hostname_changed = False

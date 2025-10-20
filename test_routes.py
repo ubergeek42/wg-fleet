@@ -97,6 +97,7 @@ def test_ping_client_without_hostname(mock_hosts, test_app):
     # Create mock request with correct client IP
     mock_request = MagicMock()
     mock_request.client.host = assigned_ip
+    mock_request.headers.get.return_value = None  # No X-Forwarded-For header
 
     with session_factory() as db:
         result = asyncio.run(ping_client(
@@ -138,6 +139,7 @@ def test_ping_with_hostname(mock_hosts, test_app):
     # Create mock request with correct client IP
     mock_request = MagicMock()
     mock_request.client.host = assigned_ip
+    mock_request.headers.get.return_value = None  # No X-Forwarded-For header
 
     with session_factory() as db:
         result = asyncio.run(ping_client(
@@ -189,6 +191,7 @@ def test_ping_hostname_deduplication(mock_hosts, test_app):
     # Create mock request with correct client IP
     mock_request = MagicMock()
     mock_request.client.host = "fd00::101"
+    mock_request.headers.get.return_value = None  # No X-Forwarded-For header
 
     with session_factory() as db:
         result = asyncio.run(ping_client(
