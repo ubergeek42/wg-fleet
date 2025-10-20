@@ -5,11 +5,13 @@ from pydantic import BaseModel
 from typing import Optional
 import ipaddress
 import random
+import re
 from datetime import datetime
 import logging
 
 from models import Client
 import wireguard
+import hosts
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,12 @@ def get_db_session():
 class RegisterResponse(BaseModel):
     status: str
     config: str
+
+class PingRequest(BaseModel):
+    hostname: Optional[str] = None
+
+class PingResponse(BaseModel):
+    status: str
 
 def allocate_random_ip(subnet_str: str) -> str:
     """
@@ -107,6 +115,100 @@ async def register_client(
     except Exception as e:
         logger.error(f"Registration failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+def get_unique_hostname(session: Session, fleet_id: str, requested: str) -> str:
+    """
+    Get unique hostname for fleet, adding number suffix if needed.
+
+    Args:
+        session: Database session
+        fleet_id: Fleet name
+        requested: Requested hostname
+
+    Returns:
+        Unique hostname (possibly with number suffix)
+    """
+    base_hostname = requested
+    counter = 2
+    current = base_hostname
+
+    while session.query(Client).filter_by(
+        fleet_id=fleet_id,
+        hostname=current
+    ).first() is not None:
+        current = f"{base_hostname}{counter}"
+        counter += 1
+
+    return current
+
+@api_router.post("/fleet/{fleet_name}/ping", response_model=PingResponse)
+async def ping_client(
+    fleet_name: str,
+    ping_req: PingRequest,
+    request: Request,
+    db: Session = Depends(get_db_session)
+):
+    """
+    Client heartbeat/ping endpoint.
+
+    1. Verify IP is in fleet subnet
+    2. Look up client by IP
+    3. Update timestamp
+    4. Handle hostname if provided
+    """
+    # Validate fleet exists
+    if fleet_name not in app_config.fleets:
+        raise HTTPException(status_code=404, detail=f"Fleet '{fleet_name}' not found")
+
+    fleet_config = app_config.fleets[fleet_name]
+
+    # Get client IP
+    client_ip = request.client.host
+
+    # Verify IP is in fleet subnet
+    try:
+        client_addr = ipaddress.IPv6Address(client_ip)
+        fleet_network = ipaddress.IPv6Network(fleet_config.subnet)
+
+        if client_addr not in fleet_network:
+            raise HTTPException(status_code=403, detail="IP not in fleet subnet")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid IP address")
+
+    # Look up client
+    client_record = db.query(Client).filter_by(
+        fleet_id=fleet_name,
+        assigned_ip=client_ip
+    ).first()
+
+    if not client_record:
+        raise HTTPException(status_code=404, detail="Client not registered")
+
+    # Update timestamp
+    client_record.timestamp = datetime.utcnow()
+
+    # Handle hostname if provided
+    hostname_changed = False
+    if ping_req.hostname:
+        # Validate hostname format
+        if not re.match(r'^[a-z0-9_-]+$', ping_req.hostname):
+            raise HTTPException(status_code=400, detail="Invalid hostname format")
+
+        # Check if different from current
+        if client_record.hostname != ping_req.hostname:
+            # Get unique hostname (handles deduplication)
+            unique_hostname = get_unique_hostname(db, fleet_name, ping_req.hostname)
+            client_record.hostname = unique_hostname
+            hostname_changed = True
+            logger.info(f"Hostname updated: fleet={fleet_name}, ip={client_ip}, hostname={unique_hostname}")
+
+    db.commit()
+
+    # Regenerate hosts file if hostname changed
+    if hostname_changed:
+        hosts.regenerate_hosts_file(app_config, _session_factory)
+
+    return PingResponse(status="ok")
 
 def create_app(config, session_factory, engine):
     """

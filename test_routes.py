@@ -71,3 +71,136 @@ def test_register_nonexistent_fleet(test_app):
 
     response = test_client.post('/fleet/nonexistent/register')
     assert response.status_code == 404
+
+@patch('routes.hosts')
+def test_ping_client_without_hostname(mock_hosts, test_app):
+    """Test ping without hostname updates timestamp"""
+    from datetime import datetime
+    import asyncio
+    from routes import ping_client, PingRequest
+    test_client, config, session_factory = test_app
+
+    # Pre-create a client
+    with session_factory() as session:
+        existing = DBClient(
+            fleet_id="testfleet",
+            public_key="test_key",
+            assigned_ip="fd00::100",
+            http_request_ip="1.2.3.4",
+            hostname=None,
+            timestamp=datetime(2020, 1, 1)
+        )
+        session.add(existing)
+        session.commit()
+        assigned_ip = existing.assigned_ip
+
+    # Create mock request with correct client IP
+    mock_request = MagicMock()
+    mock_request.client.host = assigned_ip
+
+    with session_factory() as db:
+        result = asyncio.run(ping_client(
+            fleet_name="testfleet",
+            ping_req=PingRequest(hostname=None),
+            request=mock_request,
+            db=db
+        ))
+
+        assert result.status == 'ok'
+
+    # Verify timestamp updated
+    with session_factory() as session:
+        updated = session.query(DBClient).filter_by(assigned_ip=assigned_ip).first()
+        assert updated.timestamp > datetime(2020, 1, 1)
+
+@patch('routes.hosts')
+def test_ping_with_hostname(mock_hosts, test_app):
+    """Test ping with hostname assignment"""
+    from datetime import datetime
+    import asyncio
+    from routes import ping_client, PingRequest
+    test_client, config, session_factory = test_app
+
+    # Pre-create a client
+    with session_factory() as session:
+        existing = DBClient(
+            fleet_id="testfleet",
+            public_key="test_key",
+            assigned_ip="fd00::100",
+            http_request_ip="1.2.3.4",
+            hostname=None,
+            timestamp=datetime.utcnow()
+        )
+        session.add(existing)
+        session.commit()
+        assigned_ip = existing.assigned_ip
+
+    # Create mock request with correct client IP
+    mock_request = MagicMock()
+    mock_request.client.host = assigned_ip
+
+    with session_factory() as db:
+        result = asyncio.run(ping_client(
+            fleet_name="testfleet",
+            ping_req=PingRequest(hostname='testhost'),
+            request=mock_request,
+            db=db
+        ))
+
+        assert result.status == 'ok'
+
+    # Verify hostname set
+    with session_factory() as session:
+        updated = session.query(DBClient).filter_by(assigned_ip=assigned_ip).first()
+        assert updated.hostname == 'testhost'
+
+    # Verify hosts file regenerated
+    mock_hosts.regenerate_hosts_file.assert_called_once()
+
+@patch('routes.hosts')
+def test_ping_hostname_deduplication(mock_hosts, test_app):
+    """Test duplicate hostname gets numbered"""
+    from datetime import datetime
+    import asyncio
+    from routes import ping_client, PingRequest
+    test_client, config, session_factory = test_app
+
+    # Pre-create two clients
+    with session_factory() as session:
+        client1 = DBClient(
+            fleet_id="testfleet",
+            public_key="key1",
+            assigned_ip="fd00::100",
+            http_request_ip="1.2.3.4",
+            hostname="myhost",
+            timestamp=datetime.utcnow()
+        )
+        client2 = DBClient(
+            fleet_id="testfleet",
+            public_key="key2",
+            assigned_ip="fd00::101",
+            http_request_ip="1.2.3.5",
+            hostname=None,
+            timestamp=datetime.utcnow()
+        )
+        session.add_all([client1, client2])
+        session.commit()
+
+    # Create mock request with correct client IP
+    mock_request = MagicMock()
+    mock_request.client.host = "fd00::101"
+
+    with session_factory() as db:
+        result = asyncio.run(ping_client(
+            fleet_name="testfleet",
+            ping_req=PingRequest(hostname='myhost'),
+            request=mock_request,
+            db=db
+        ))
+
+        assert result.status == 'ok'
+
+    # Verify hostname got numbered
+    with session_factory() as session:
+        updated = session.query(DBClient).filter_by(assigned_ip="fd00::101").first()
+        assert updated.hostname == 'myhost2'
