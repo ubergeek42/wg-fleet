@@ -1,0 +1,16 @@
+---
+domain: icpcnet.internal
+prune_timeout: 30m
+
+fleets:
+  southeast:
+    ip6: fd00:a0a8:34d:2a00::1
+    subnet: fd00:a0a8:34d:2a00::/64
+    external_ip: 1.2.3.4
+    port: 51820
+
+  northwest:
+    ip6: fd00:a0a8:34d:2000::1
+    subnet: fd00:a0a8:34d:2000::/64
+    external_ip: 1.2.3.4
+    port: 51821
