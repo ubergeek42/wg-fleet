@@ -4,7 +4,7 @@ from models import Client, Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 import tempfile
 import os
 
@@ -27,7 +27,7 @@ def test_db_with_clients():
                 assigned_ip="fd00::100",
                 http_request_ip="192.168.1.1",
                 hostname="host1",
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             ),
             Client(
                 fleet_id="testfleet",
@@ -35,7 +35,7 @@ def test_db_with_clients():
                 assigned_ip="fd00::101",
                 http_request_ip="192.168.1.2",
                 hostname="host2",
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             ),
             Client(
                 fleet_id="otherfleet",
@@ -43,7 +43,7 @@ def test_db_with_clients():
                 assigned_ip="fd01::200",
                 http_request_ip="192.168.1.3",
                 hostname=None,  # No hostname
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(UTC)
             )
         ]
         session.add_all(clients)

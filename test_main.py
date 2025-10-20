@@ -4,7 +4,7 @@ from main import setup_fleet_interface, reconcile_fleet_state
 from models import Client, Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import datetime, UTC
 import tempfile
 import os
 
@@ -62,7 +62,7 @@ def test_reconcile_fleet_state(mock_wg, test_db):
             public_key="orphan_key",
             assigned_ip="fd00::100",
             http_request_ip="1.2.3.4",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         # Client in both DB and WG
         valid = Client(
@@ -70,15 +70,15 @@ def test_reconcile_fleet_state(mock_wg, test_db):
             public_key="valid_key",
             assigned_ip="fd00::101",
             http_request_ip="1.2.3.5",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         session.add_all([orphan, valid])
         session.commit()
 
     # Mock WireGuard peers (includes valid + extra peer not in DB)
     mock_wg.list_peers.return_value = [
-        {'public_key': 'valid_key', 'last_handshake': datetime.utcnow()},
-        {'public_key': 'extra_key', 'last_handshake': datetime.utcnow()}
+        {'public_key': 'valid_key', 'last_handshake': datetime.now(UTC)},
+        {'public_key': 'extra_key', 'last_handshake': datetime.now(UTC)}
     ]
 
     reconcile_fleet_state('testfleet', session_factory)

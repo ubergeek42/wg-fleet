@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from database import init_db, get_session_factory
 from models import Base, Client
-from datetime import datetime
+from datetime import datetime, UTC
 import tempfile
 import os
 
@@ -41,7 +41,7 @@ def test_client_model_creation(test_db):
             assigned_ip="fd00::100",
             http_request_ip="192.168.1.1",
             hostname="testhost",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         session.add(client)
         session.commit()

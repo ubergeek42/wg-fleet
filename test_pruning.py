@@ -4,7 +4,7 @@ from pruning import prune_stale_clients_once
 from models import Client, Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import tempfile
 import os
 
@@ -27,7 +27,7 @@ def test_db_with_stale_clients():
             assigned_ip="fd00::100",
             http_request_ip="1.2.3.4",
             hostname="stale",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         # Active client (recent handshake)
         active = Client(
@@ -36,7 +36,7 @@ def test_db_with_stale_clients():
             assigned_ip="fd00::101",
             http_request_ip="1.2.3.5",
             hostname="active",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         session.add_all([stale, active])
         session.commit()
@@ -52,8 +52,8 @@ def test_prune_stale_clients(mock_hosts, mock_wg, test_db_with_stale_clients):
     session_factory, db_path = test_db_with_stale_clients
 
     # Mock WireGuard peer list
-    old_handshake = datetime.utcnow() - timedelta(hours=2)
-    recent_handshake = datetime.utcnow() - timedelta(minutes=5)
+    old_handshake = datetime.now(UTC) - timedelta(hours=2)
+    recent_handshake = datetime.now(UTC) - timedelta(minutes=5)
 
     mock_wg.list_peers.return_value = [
         {'public_key': 'stale_key', 'last_handshake': old_handshake},

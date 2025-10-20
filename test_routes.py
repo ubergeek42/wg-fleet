@@ -75,7 +75,7 @@ def test_register_nonexistent_fleet(test_app):
 @patch('routes.hosts')
 def test_ping_client_without_hostname(mock_hosts, test_app):
     """Test ping without hostname updates timestamp"""
-    from datetime import datetime
+    from datetime import datetime, UTC
     import asyncio
     from routes import ping_client, PingRequest
     test_client, config, session_factory = test_app
@@ -117,7 +117,7 @@ def test_ping_client_without_hostname(mock_hosts, test_app):
 @patch('routes.hosts')
 def test_ping_with_hostname(mock_hosts, test_app):
     """Test ping with hostname assignment"""
-    from datetime import datetime
+    from datetime import datetime, UTC
     import asyncio
     from routes import ping_client, PingRequest
     test_client, config, session_factory = test_app
@@ -130,7 +130,7 @@ def test_ping_with_hostname(mock_hosts, test_app):
             assigned_ip="fd00::100",
             http_request_ip="1.2.3.4",
             hostname=None,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         session.add(existing)
         session.commit()
@@ -162,7 +162,7 @@ def test_ping_with_hostname(mock_hosts, test_app):
 @patch('routes.hosts')
 def test_ping_hostname_deduplication(mock_hosts, test_app):
     """Test duplicate hostname gets numbered"""
-    from datetime import datetime
+    from datetime import datetime, UTC
     import asyncio
     from routes import ping_client, PingRequest
     test_client, config, session_factory = test_app
@@ -175,7 +175,7 @@ def test_ping_hostname_deduplication(mock_hosts, test_app):
             assigned_ip="fd00::100",
             http_request_ip="1.2.3.4",
             hostname="myhost",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         client2 = DBClient(
             fleet_id="testfleet",
@@ -183,7 +183,7 @@ def test_ping_hostname_deduplication(mock_hosts, test_app):
             assigned_ip="fd00::101",
             http_request_ip="1.2.3.5",
             hostname=None,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         session.add_all([client1, client2])
         session.commit()

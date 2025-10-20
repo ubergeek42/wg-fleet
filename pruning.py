@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import logging
 
 from models import Client
@@ -21,7 +21,7 @@ def prune_stale_clients_once(config, session_factory) -> int:
         Number of clients pruned
     """
     prune_count = 0
-    cutoff = datetime.utcnow() - parse_duration(config.prune_timeout)
+    cutoff = datetime.now(UTC) - parse_duration(config.prune_timeout)
 
     for fleet_name, fleet_config in config.fleets.items():
         try:
