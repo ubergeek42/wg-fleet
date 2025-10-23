@@ -108,7 +108,8 @@ async def register_client(
             server_public_key=server_pubkey,
             endpoint_ip=fleet_config.external_ip,
             endpoint_port=fleet_config.port,
-            server_ip=fleet_config.ip6
+            server_ip=fleet_config.ip6,
+            subnet=fleet_config.subnet
         )
 
         return RegisterResponse(status="success", config=config_text)

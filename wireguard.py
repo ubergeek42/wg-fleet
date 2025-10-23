@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Tuple
 import logging
+import ipaddress
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,19 @@ def create_interface_config(
     if config_path is None:
         config_path = f'/etc/wireguard/wg_{fleet_name}.conf'
 
+    # Extract prefix length from subnet
+    network = ipaddress.IPv6Network(fleet_config.subnet, strict=False)
+    prefix_len = network.prefixlen
+
     config_content = f"""[Interface]
-Address = {fleet_config['ip6']}
-ListenPort = {fleet_config['port']}
+Address = {fleet_config.ip6}/{prefix_len}
+ListenPort = {fleet_config.port}
 PrivateKey = {private_key}
 """
 
-    Path(config_path).write_text(config_content)
+    config_file = Path(config_path)
+    config_file.write_text(config_content)
+    config_file.chmod(0o400)
     logger.info(f"Created WireGuard config: {config_path}")
 
 def interface_exists(fleet_name: str) -> bool:
@@ -165,7 +172,8 @@ def build_client_config(
     server_public_key: str,
     endpoint_ip: str,
     endpoint_port: int,
-    server_ip: str
+    server_ip: str,
+    subnet: str
 ) -> str:
     """
     Build WireGuard configuration text for client.
@@ -177,13 +185,18 @@ def build_client_config(
         endpoint_ip: Server's external IP
         endpoint_port: Server's WireGuard port
         server_ip: Server's internal IPv6 (for AllowedIPs)
+        subnet: Fleet subnet in CIDR notation (e.g., fd00::/64)
 
     Returns:
         WireGuard config as string
     """
+    # Extract prefix length from subnet
+    network = ipaddress.IPv6Network(subnet, strict=False)
+    prefix_len = network.prefixlen
+
     return f"""[Interface]
 PrivateKey = {client_private_key}
-Address = {client_ip}
+Address = {client_ip}/{prefix_len}
 
 [Peer]
 PublicKey = {server_public_key}
