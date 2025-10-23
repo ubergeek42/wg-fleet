@@ -156,8 +156,8 @@ def main():
     app.add_event_handler("startup", startup)
     app.add_event_handler("shutdown", shutdown)
 
-    # Run server
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Run server on all interfaces (IPv4 and IPv6)
+    uvicorn.run(app, host=["::", "0.0.0.0"], port=8000)
 
 if __name__ == "__main__":
     main()
