@@ -1,6 +1,6 @@
 from command import run_command
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List, Tuple
 import logging
 import ipaddress
@@ -74,6 +74,11 @@ def bring_up_interface(fleet_name: str) -> None:
     Args:
         fleet_name: Name of the fleet
     """
+    # Check if interface is already up
+    if interface_exists(fleet_name):
+        logger.info(f"Interface wg_{fleet_name} already exists, skipping bring up")
+        return
+
     run_command(['wg-quick', 'up', f'wg_{fleet_name}'])
     logger.info(f"Brought up interface: wg_{fleet_name}")
 
@@ -131,25 +136,26 @@ def list_peers(fleet_name: str) -> List[Dict]:
     output = run_command(['wg', 'show', f'wg_{fleet_name}', 'dump'])
 
     peers = []
-    for line in output.split('\n')[1:]:  # Skip header line
+    for line in output.split('\n')[1:]:  # Skip first line (server interface)
         if not line.strip():
             continue
 
         parts = line.split('\t')
-        if len(parts) < 4:
+        if len(parts) < 8:  # Peer lines have 8 fields
             continue
 
-        # Parse last handshake timestamp
+        # Parse last handshake timestamp (field 4)
         last_handshake = None
-        if parts[3] and parts[3] != '0':
-            last_handshake = datetime.fromtimestamp(int(parts[3]))
+        if parts[4] and parts[4] != '0':
+            last_handshake = datetime.fromtimestamp(int(parts[4]), UTC)
 
         peers.append({
             'public_key': parts[0],
-            'allowed_ips': parts[1],
+            'allowed_ips': parts[3],
+            'endpoint': parts[2] if parts[2] != '(none)' else None,
             'last_handshake': last_handshake,
-            'rx_bytes': int(parts[4]) if len(parts) > 4 else 0,
-            'tx_bytes': int(parts[5]) if len(parts) > 5 else 0
+            'rx_bytes': int(parts[5]) if parts[5] else 0,
+            'tx_bytes': int(parts[6]) if parts[6] else 0
         })
 
     return peers
