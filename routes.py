@@ -217,6 +217,43 @@ async def ping_client(
 # Jinja2 templates setup
 templates = Jinja2Templates(directory="templates")
 
+# Add custom filter for relative time
+def humanize_timedelta(dt):
+    """Convert datetime to relative time string (e.g., '2m 30s ago')"""
+    if dt is None:
+        return None
+
+    # Handle both naive and aware datetimes
+    now = datetime.now(UTC)
+
+    # If dt is naive, assume it's UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    delta = now - dt
+
+    if delta.total_seconds() < 0:
+        return "in the future"
+
+    seconds = int(delta.total_seconds())
+
+    if seconds < 60:
+        return f"{seconds}s ago"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        secs = seconds % 60
+        return f"{minutes}m {secs}s ago"
+    elif seconds < 86400:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m ago"
+    else:
+        days = seconds // 86400
+        hours = (seconds % 86400) // 3600
+        return f"{days}d {hours}h ago"
+
+templates.env.filters['humanize'] = humanize_timedelta
+
 @web_router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Fleet list page"""
