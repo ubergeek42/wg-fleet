@@ -30,21 +30,32 @@ def prune_stale_clients_once(config, session_factory) -> int:
 
             with session_factory() as session:
                 for peer in wg_peers:
-                    # Skip if no handshake data
-                    if peer['last_handshake'] is None:
-                        continue
+                    # Get client from database
+                    client = session.query(Client).filter_by(
+                        fleet_id=fleet_name,
+                        public_key=peer['public_key']
+                    ).first()
 
-                    # Check if stale
-                    if peer['last_handshake'] < cutoff:
+                    should_prune = False
+
+                    # Check if client should be pruned
+                    if peer['last_handshake'] is None:
+                        # Never connected - check registration timestamp
+                        if client:
+                            # Database timestamps are naive but represent UTC
+                            client_time = client.timestamp.replace(tzinfo=UTC) if client.timestamp.tzinfo is None else client.timestamp
+                            if client_time < cutoff:
+                                should_prune = True
+                    else:
+                        # Has connected - check handshake timestamp
+                        if peer['last_handshake'] < cutoff:
+                            should_prune = True
+
+                    if should_prune:
                         # Remove from WireGuard
                         wireguard.remove_peer(fleet_name, peer['public_key'])
 
                         # Remove from database
-                        client = session.query(Client).filter_by(
-                            fleet_id=fleet_name,
-                            public_key=peer['public_key']
-                        ).first()
-
                         if client:
                             session.delete(client)
                             prune_count += 1
