@@ -47,6 +47,22 @@
     <h1>Fleet: {{ fleet_name }}</h1>
     <a href="/">← Back to fleet list</a>
 
+    <h2>Fleet Configuration</h2>
+    <table>
+        <tr>
+            <th>Subnet</th>
+            <td>{{ fleet_config.subnet }}</td>
+        </tr>
+        <tr>
+            <th>Server IPv6</th>
+            <td>{{ fleet_config.ip6 }}</td>
+        </tr>
+        <tr>
+            <th>WireGuard Port</th>
+            <td>{{ fleet_config.port }}</td>
+        </tr>
+    </table>
+
     <h2>Active Clients ({{ clients|length }})</h2>
     <table>
         <thead>
