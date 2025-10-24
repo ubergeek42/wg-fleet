@@ -145,7 +145,7 @@ def get_unique_hostname(session: Session, fleet_id: str, requested: str) -> str:
         fleet_id=fleet_id,
         hostname=current
     ).first() is not None:
-        current = f"{base_hostname}{counter}"
+        current = f"{base_hostname}--{counter}"
         counter += 1
 
     return current
