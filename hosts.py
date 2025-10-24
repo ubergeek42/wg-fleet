@@ -4,11 +4,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-HOSTS_FILE_PATH = "/run/fleet_hosts"
+HOSTS_FILE_PATH = "/run/wg_fleet_hosts"
 
 def regenerate_hosts_file(config, session_factory, hosts_path: str = None):
     """
-    Regenerate /run/fleet_hosts from database.
+    Regenerate /run/wg_fleet_hosts from database.
 
     Format: <ipv6> <hostname>.<fleet>.<domain>
     Only includes clients with hostnames set.

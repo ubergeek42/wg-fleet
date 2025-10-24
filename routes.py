@@ -164,10 +164,9 @@ async def ping_client(
 
     fleet_config = app_config.fleets[fleet_name]
 
-    # Get client IP (support X-Forwarded-For for testing and reverse proxies)
-    client_ip = request.headers.get('X-Forwarded-For')
-    if not client_ip:
-        client_ip = request.client.host
+    # Get client IP (uvicorn's ProxyHeadersMiddleware populates this from X-Forwarded-For
+    # when proxy_headers=True and the request comes from a trusted proxy)
+    client_ip = request.client.host
 
     # Verify IP is in fleet subnet
     try:
@@ -175,7 +174,7 @@ async def ping_client(
         fleet_network = ipaddress.IPv6Network(fleet_config.subnet)
 
         if client_addr not in fleet_network:
-            raise HTTPException(status_code=403, detail="IP not in fleet subnet")
+            raise HTTPException(status_code=403, detail=f"IP not in fleet subnet: {client_ip}")
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid IP address")
 

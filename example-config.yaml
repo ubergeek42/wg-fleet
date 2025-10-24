@@ -4,6 +4,8 @@ prune_timeout: 30m
 
 fleets:
   southeast:
+    # Could generate the wireguard network:
+    # with echo "fd:`openssl rand -hex 5 |fold -w2 | paste -sd: `::/64"
     ip6: fd00:a0a8:34d:2a00::1
     subnet: fd00:a0a8:34d:2a00::/64
     external_ip: 1.2.3.4

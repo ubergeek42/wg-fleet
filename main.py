@@ -157,7 +157,15 @@ def main():
     app.add_event_handler("shutdown", shutdown)
 
     # Run server on all interfaces (IPv4 and IPv6)
-    uvicorn.run(app, host=["::", "0.0.0.0"], port=8000)
+    # proxy_headers=True enables trusting X-Forwarded-* headers from reverse proxies
+    # forwarded_allow_ips restricts which IPs we trust proxy headers from (localhost/nginx)
+    uvicorn.run(
+        app,
+        host=["::", "0.0.0.0"],
+        port=8000,
+        proxy_headers=True,
+        forwarded_allow_ips="127.0.0.1,::1"
+    )
 
 if __name__ == "__main__":
     main()
