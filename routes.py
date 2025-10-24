@@ -31,6 +31,8 @@ def get_db_session():
 class RegisterResponse(BaseModel):
     status: str
     config: str
+    port: int
+    server_ip: str
 
 class PingRequest(BaseModel):
     hostname: Optional[str] = None
@@ -112,7 +114,12 @@ async def register_client(
             subnet=fleet_config.subnet
         )
 
-        return RegisterResponse(status="success", config=config_text)
+        return RegisterResponse(
+            status="success",
+            config=config_text,
+            port=fleet_config.port,
+            server_ip=fleet_config.ip6
+        )
 
     except Exception as e:
         logger.error(f"Registration failed: {e}", exc_info=True)
@@ -271,6 +278,8 @@ async def fleet_detail(
     if fleet_name not in app_config.fleets:
         raise HTTPException(status_code=404, detail="Fleet not found")
 
+    fleet_config = app_config.fleets[fleet_name]
+
     # Get clients from database
     clients = db.query(Client).filter_by(fleet_id=fleet_name).all()
 
@@ -293,6 +302,7 @@ async def fleet_detail(
     return templates.TemplateResponse("fleet.html", {
         "request": request,
         "fleet_name": fleet_name,
+        "fleet_config": fleet_config,
         "clients": clients
     })
 
