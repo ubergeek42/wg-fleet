@@ -18,7 +18,7 @@ wg-fleet simplifies managing large numbers of WireGuard clients that may be clon
 
 ```
 Clients (WireGuard) -> FastAPI Application -> SQLite Database + WireGuard Interfaces
-                                           -> /run/fleet_hosts
+                                           -> /run/wg_fleet_hosts
 ```
 
 The application uses a layered architecture:
@@ -175,7 +175,7 @@ sudo journalctl -u wg-fleet -f
 - Configuration: `/etc/wg-fleet.yaml`
 - Database: `/var/lib/wg-fleet/clients.db`
 - WireGuard configs: `/etc/wireguard/wg_<fleet>.conf`
-- Hosts file: `/run/fleet_hosts`
+- Hosts file: `/run/wg_fleet_hosts`
 
 ## API Endpoints
 
@@ -334,7 +334,7 @@ sudo systemctl start wg-fleet-ping.timer
 
 ## Hosts File Integration
 
-wg-fleet generates `/run/fleet_hosts` with entries for all clients that have hostnames:
+wg-fleet generates `/run/wg_fleet_hosts` with entries for all clients that have hostnames:
 
 ```
 fd00:a0a8:34d:2a00::1234 excavator.southeast.icpcnet.internal
@@ -345,10 +345,10 @@ To integrate with system DNS, include this file in your DNS server configuration
 
 ```bash
 # Option 1: Symlink or copy to /etc/hosts.d/ (if supported)
-sudo ln -s /run/fleet_hosts /etc/hosts.d/fleet
+sudo ln -s /run/wg_fleet_hosts /etc/hosts.d/fleet
 
 # Option 2: Append to /etc/hosts
-cat /run/fleet_hosts | sudo tee -a /etc/hosts
+cat /run/wg_fleet_hosts | sudo tee -a /etc/hosts
 ```
 
 For dynamic integration, you could use a cron job to periodically merge the fleet_hosts file.
@@ -436,10 +436,10 @@ curl http://server:8000/
 **Check:**
 1. Hostname was set via ping endpoint
 2. Client is active (not pruned)
-3. `/run/fleet_hosts` file exists and contains entry
+3. `/run/wg_fleet_hosts` file exists and contains entry
 
 ```bash
-cat /run/fleet_hosts | grep myhost
+cat /run/wg_fleet_hosts | grep myhost
 ```
 
 ### Dashboard shows "N/A" for handshake
