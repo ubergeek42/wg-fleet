@@ -14,7 +14,8 @@ from routes import create_app
 from pruning import prune_stale_clients
 from models import Client
 import wireguard
-import hosts
+from hook_manager import trigger_hooks, EventType, HookContext
+import hooks  # Import to register hooks
 
 # Setup logging
 logging.basicConfig(
@@ -118,8 +119,12 @@ async def startup():
             setup_fleet_interface(fleet_name, fleet_config)
             reconcile_fleet_state(fleet_name, session_factory)
 
-        # Generate initial hosts file
-        hosts.regenerate_hosts_file(app_config, session_factory)
+        # Generate initial hosts file via hook system
+        trigger_hooks(EventType.STARTUP, HookContext(
+            event_type=EventType.STARTUP,
+            config=app_config,
+            session_factory=session_factory
+        ))
 
         # Start background pruning task
         asyncio.create_task(prune_stale_clients(app_config, session_factory))

@@ -21,8 +21,9 @@ def regenerate_hosts_file_hook(context: HookContext):
     Format: <ipv6> <hostname>.<fleet>.<domain>
     Only includes clients with hostnames set.
     """
-    # Filter events - only regenerate on client changes
+    # Filter events - regenerate on startup and client changes
     if context.event_type not in [
+        EventType.STARTUP,
         EventType.CLIENT_ADDED,
         EventType.CLIENT_HOSTNAME_CHANGED,
         EventType.CLIENT_REMOVED
