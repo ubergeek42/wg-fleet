@@ -27,6 +27,7 @@ def prometheus_sd_hook(context: HookContext):
     """
     # Filter events - only regenerate on client changes
     if context.event_type not in [
+        EventType.STARTUP,
         EventType.CLIENT_ADDED,
         EventType.CLIENT_HOSTNAME_CHANGED,
         EventType.CLIENT_REMOVED
