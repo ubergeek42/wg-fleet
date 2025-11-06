@@ -52,9 +52,15 @@ def test_create_interface_config():
     with tempfile.TemporaryDirectory() as tmpdir:
         config_path = Path(tmpdir) / 'wg_test.conf'
 
+        # create_interface_config expects a config object with subnet, ip6, and port attributes
+        fleet_config = MagicMock()
+        fleet_config.subnet = 'fd00::/64'
+        fleet_config.ip6 = 'fd00::1'
+        fleet_config.port = 51820
+
         create_interface_config(
             'test',
-            {'ip6': 'fd00::1', 'port': 51820},
+            fleet_config,
             'test_private_key',
             str(config_path)
         )
@@ -62,7 +68,7 @@ def test_create_interface_config():
         assert config_path.exists()
         content = config_path.read_text()
         assert '[Interface]' in content
-        assert 'Address = fd00::1' in content
+        assert 'Address = fd00::1/64' in content  # Should include prefix length from subnet
         assert 'ListenPort = 51820' in content
         assert 'PrivateKey = test_private_key' in content
 
@@ -70,10 +76,14 @@ def test_create_interface_config():
 def test_list_peers(mock_run_command):
     """Test listing peers from WireGuard"""
     # Mock output format: header line + peer data
-    # wg show dump format: pubkey preshared-key endpoint allowed-ips last-handshake rx tx persistent-keepalive
-    mock_run_command.return_value = "private-key\tpublic-key\tlisten-port\tfwmark\npubkey1\tfd00::100/128\t\t1697740800\t1024\t2048\t0"
+    # wg show dump format: 8 tab-separated fields per peer:
+    # public_key, preshared_key, endpoint, allowed_ips, last_handshake, rx_bytes, tx_bytes, persistent_keepalive
+    mock_run_command.return_value = "private-key\tpublic-key\tlisten-port\tfwmark\npubkey1\t(none)\t192.168.1.100:51820\tfd00::100/128\t1697740800\t1024\t2048\t25"
 
     peers = list_peers('testfleet')
     assert len(peers) == 1
     assert peers[0]['public_key'] == 'pubkey1'
     assert peers[0]['allowed_ips'] == 'fd00::100/128'
+    assert peers[0]['endpoint'] == '192.168.1.100:51820'
+    assert peers[0]['rx_bytes'] == 1024
+    assert peers[0]['tx_bytes'] == 2048
