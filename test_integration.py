@@ -38,11 +38,12 @@ def integration_app():
 
     os.unlink(db_path)
 
-@patch('routes.hosts')
+@patch('routes.trigger_hooks')
 @patch('routes.wireguard')
 @patch('routes.allocate_random_ip')
-def test_full_client_lifecycle(mock_allocate_ip, mock_wg, mock_hosts, integration_app):
+def test_full_client_lifecycle(mock_allocate_ip, mock_wg, mock_trigger_hooks, integration_app):
     """Test full client lifecycle: register -> ping -> verify dashboard"""
+    from hook_manager import EventType
     client, config, session_factory = integration_app
 
     # Mock WireGuard operations
@@ -66,8 +67,9 @@ def test_full_client_lifecycle(mock_allocate_ip, mock_wg, mock_hosts, integratio
     )
     assert response.status_code == 200
 
-    # Verify hosts file regeneration was called
-    mock_hosts.regenerate_hosts_file.assert_called_once()
+    # Verify hooks triggered for hostname change
+    mock_trigger_hooks.assert_called_once()
+    assert mock_trigger_hooks.call_args[0][0] == EventType.CLIENT_HOSTNAME_CHANGED
 
     # 3. Check dashboard shows client
     response = client.get('/fleet/testfleet')
