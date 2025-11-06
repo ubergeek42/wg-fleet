@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, UTC
 import tempfile
 import os
+import json
 
 
 @pytest.fixture
@@ -125,3 +126,67 @@ def test_hosts_file_hook_handles_startup(test_db_with_clients, app_config, tmp_p
 
     finally:
         hooks.hosts_file.HOSTS_FILE_PATH = original_path
+
+
+def test_prometheus_sd_hook_generates_targets(test_db_with_clients, app_config, tmp_path):
+    """Test that prometheus_sd hook generates correct service discovery targets"""
+    from hooks.prometheus_sd import prometheus_sd_hook
+
+    # Override prometheus targets path for testing
+    import hooks.prometheus_sd
+    original_path = hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH
+    test_targets_path = tmp_path / "prometheus_targets.json"
+    hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH = str(test_targets_path)
+
+    try:
+        context = HookContext(
+            event_type=EventType.CLIENT_HOSTNAME_CHANGED,
+            config=app_config,
+            session_factory=test_db_with_clients['session_factory']
+        )
+
+        prometheus_sd_hook(context)
+
+        # Verify targets file was created
+        assert test_targets_path.exists()
+
+        # Verify content
+        with open(test_targets_path) as f:
+            targets = json.load(f)
+
+        # Should have 2 targets (third client has no hostname)
+        assert len(targets) == 2
+
+        # Verify format
+        target_ips = [t['targets'][0] for t in targets]
+        assert '[fd00::100]:9100' in target_ips
+        assert '[fd00::101]:9100' in target_ips
+
+        # Verify labels
+        for target in targets:
+            assert 'labels' in target
+            assert 'hostname' in target['labels']
+            assert 'fleet' in target['labels']
+            assert target['labels']['job'] == 'node_exporter'
+
+        # Find specific target and check labels
+        host1_target = next(t for t in targets if t['labels']['hostname'] == 'host1')
+        assert host1_target['labels']['fleet'] == 'testfleet'
+
+    finally:
+        hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH = original_path
+
+
+def test_prometheus_sd_hook_filters_events():
+    """Test that prometheus_sd hook only runs on relevant events"""
+    from hooks.prometheus_sd import prometheus_sd_hook
+
+    # Hook should do nothing for irrelevant events - just ensure it doesn't crash
+    context = HookContext(
+        event_type=EventType.STARTUP,  # STARTUP is not in the filter list
+        config=type('Config', (), {})(),
+        session_factory=lambda: None
+    )
+
+    # Should not raise any errors
+    prometheus_sd_hook(context)
