@@ -9,6 +9,7 @@ from datetime import datetime, UTC
 import tempfile
 import os
 import json
+import yaml
 
 
 @pytest.fixture
@@ -177,16 +178,116 @@ def test_prometheus_sd_hook_generates_targets(test_db_with_clients, app_config, 
         hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH = original_path
 
 
-def test_prometheus_sd_hook_filters_events():
-    """Test that prometheus_sd hook only runs on relevant events"""
+def test_prometheus_sd_hook_on_startup(test_db_with_clients, app_config, tmp_path):
+    """Test that prometheus_sd hook runs on STARTUP events"""
     from hooks.prometheus_sd import prometheus_sd_hook
 
-    # Hook should do nothing for irrelevant events - just ensure it doesn't crash
-    context = HookContext(
-        event_type=EventType.STARTUP,  # STARTUP is not in the filter list
-        config=type('Config', (), {})(),
-        session_factory=lambda: None
-    )
+    # Override prometheus targets path for testing
+    import hooks.prometheus_sd
+    original_path = hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH
+    test_targets_path = tmp_path / "prometheus_targets.json"
+    hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH = str(test_targets_path)
 
-    # Should not raise any errors
-    prometheus_sd_hook(context)
+    try:
+        context = HookContext(
+            event_type=EventType.STARTUP,
+            config=app_config,
+            session_factory=test_db_with_clients['session_factory']
+        )
+
+        # Should not raise any errors
+        prometheus_sd_hook(context)
+
+        # Verify it generated the file
+        assert test_targets_path.exists()
+
+    finally:
+        hooks.prometheus_sd.PROMETHEUS_TARGETS_PATH = original_path
+
+
+def test_ansible_inventory_hook_generates_yaml_inventory(test_db_with_clients, app_config, tmp_path):
+    """Test that ansible_inventory hook generates correct YAML inventory file"""
+    from hooks.ansible_inventory import ansible_inventory_hook
+
+    # Override inventory path for testing
+    import hooks.ansible_inventory
+    original_path = hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH
+    test_inventory_path = tmp_path / "ansible_inventory.yml"
+    hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = str(test_inventory_path)
+
+    try:
+        context = HookContext(
+            event_type=EventType.CLIENT_HOSTNAME_CHANGED,
+            config=app_config,
+            session_factory=test_db_with_clients['session_factory']
+        )
+
+        ansible_inventory_hook(context)
+
+        # Verify inventory file was created
+        assert test_inventory_path.exists()
+
+        # Parse and verify YAML content
+        with open(test_inventory_path) as f:
+            inventory = yaml.safe_load(f)
+
+        # Should have 'all' top-level group
+        assert 'all' in inventory
+        assert 'children' in inventory['all']
+
+        # Should have fleet groups as children
+        children = inventory['all']['children']
+        assert 'testfleet' in children
+        assert 'otherfleet' in children
+
+        # Check testfleet group
+        testfleet = children['testfleet']
+        assert 'hosts' in testfleet
+        assert 'host1.testfleet' in testfleet['hosts']
+        assert 'host2.testfleet' in testfleet['hosts']
+
+        # Hosts should have empty dicts (no ansible_host needed - resolved via hosts file)
+        assert testfleet['hosts']['host1.testfleet'] == {}
+        assert testfleet['hosts']['host2.testfleet'] == {}
+
+        # otherfleet should be empty (client has no hostname)
+        otherfleet = children['otherfleet']
+        assert 'hosts' in otherfleet
+        assert len(otherfleet['hosts']) == 0
+
+    finally:
+        hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = original_path
+
+
+def test_ansible_inventory_hook_handles_startup(test_db_with_clients, app_config, tmp_path):
+    """Test that ansible_inventory hook runs on STARTUP events"""
+    from hooks.ansible_inventory import ansible_inventory_hook
+
+    # Override inventory path for testing
+    import hooks.ansible_inventory
+    original_path = hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH
+    test_inventory_path = tmp_path / "ansible_inventory.yml"
+    hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = str(test_inventory_path)
+
+    try:
+        context = HookContext(
+            event_type=EventType.STARTUP,
+            config=app_config,
+            session_factory=test_db_with_clients['session_factory']
+        )
+
+        ansible_inventory_hook(context)
+
+        # Verify inventory file was created on startup
+        assert test_inventory_path.exists()
+
+        # Parse and verify YAML has fleet groups
+        with open(test_inventory_path) as f:
+            inventory = yaml.safe_load(f)
+
+        assert 'all' in inventory
+        assert 'testfleet' in inventory['all']['children']
+        assert 'host1.testfleet' in inventory['all']['children']['testfleet']['hosts']
+
+    finally:
+        hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = original_path
