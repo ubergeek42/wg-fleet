@@ -329,7 +329,8 @@ PersistentKeepalive = 25
    - Check for existing hostname in fleet
    - If duplicate, append incrementing number (excavator → excavator2)
    - Update database with (possibly modified) hostname
-   - Call `hosts.regenerate_hosts_file()`
+   - Trigger hooks via `trigger_hooks(EventType.CLIENT_HOSTNAME_CHANGED, HookContext(...))`
+   - See `docs/plans/2025-11-05-hook-system-design.md` for details
 
 **Hostname Deduplication:**
 ```python
@@ -417,7 +418,14 @@ async def prune_stale_clients(config: Config, db_session_factory):
 
             if prune_count > 0:
                 logger.info(f"Pruned {prune_count} stale clients")
-                hosts.regenerate_hosts_file(config, db_session_factory)
+                # Trigger hooks to update hosts file and other integrations
+                trigger_hooks(EventType.CLIENT_REMOVED, HookContext(
+                    event_type=EventType.CLIENT_REMOVED,
+                    config=config,
+                    session_factory=db_session_factory,
+                    client_data={'count': prune_count}
+                ))
+                # See docs/plans/2025-11-05-hook-system-design.md for details
 
         except Exception as e:
             logger.error(f"Error in pruning task: {e}", exc_info=True)
@@ -434,9 +442,11 @@ async def prune_stale_clients(config: Config, db_session_factory):
 
 ---
 
-### 7. Hosts File Management (`hosts.py`)
+### 7. Hosts File Management (Hook System)
 
-**Purpose:** Generate `/run/fleet_hosts` file for DNS/hostname resolution.
+**Purpose:** Generate `/run/wg_fleet_hosts` file for DNS/hostname resolution.
+
+**Architecture:** Implemented as a hook in the hook system (see `docs/plans/2025-11-05-hook-system-design.md`).
 
 **Format:**
 ```
@@ -450,8 +460,11 @@ fd00:a0a8:34d:2000::5678 driller.northwest.icpcnet.internal
 ```
 
 **Implementation:**
+The hosts file generation is implemented as a hook in `hooks/hosts_file.py`:
+
 ```python
-def regenerate_hosts_file(config: Config, db_session_factory):
+@register_hook
+def regenerate_hosts_file_hook(context: HookContext):
     """
     Full regeneration from database.
 
@@ -460,15 +473,23 @@ def regenerate_hosts_file(config: Config, db_session_factory):
     3. Format lines as: <assigned_ip> <fqdn>
     4. Write atomically (temp file + rename)
     """
+    # Filter events - only regenerate on client changes
+    if context.event_type not in [
+        EventType.CLIENT_ADDED,
+        EventType.CLIENT_HOSTNAME_CHANGED,
+        EventType.CLIENT_REMOVED
+    ]:
+        return
+
     lines = []
 
-    with db_session_factory() as session:
+    with context.session_factory() as session:
         clients = session.query(Client).filter(
             Client.hostname.isnot(None)
         ).all()
 
         for client in clients:
-            fqdn = f"{client.hostname}.{client.fleet_id}.{config.domain}"
+            fqdn = f"{client.hostname}.{client.fleet_id}.{context.config.domain}"
             lines.append(f"{client.assigned_ip} {fqdn}")
 
     # Atomic write
@@ -481,11 +502,13 @@ def regenerate_hosts_file(config: Config, db_session_factory):
 ```
 
 **Trigger Points:**
-- On startup (initial generation)
-- After any ping that changes a hostname
-- After pruning cycle (if clients were removed)
+- On startup via `trigger_hooks(EventType.STARTUP, ...)`
+- After any ping that changes a hostname via `trigger_hooks(EventType.CLIENT_HOSTNAME_CHANGED, ...)`
+- After pruning cycle via `trigger_hooks(EventType.CLIENT_REMOVED, ...)` (if clients were removed)
 
-**File Location:** `/run/fleet_hosts` (tmpfs, doesn't persist across reboots)
+**File Location:** `/run/wg_fleet_hosts` (tmpfs, doesn't persist across reboots)
+
+**Extensibility:** Additional hooks can be added by creating new files in `hooks/` directory and importing them in `hooks/__init__.py`. See hook system documentation for details.
 
 ---
 

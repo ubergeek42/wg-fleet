@@ -332,6 +332,59 @@ sudo systemctl enable wg-fleet-ping.timer
 sudo systemctl start wg-fleet-ping.timer
 ```
 
+## Hook System
+
+wg-fleet uses a hook system for event-driven actions when clients change. This allows easy addition of integrations like DNS updates, monitoring, or service discovery.
+
+### Adding a New Hook
+
+1. Create a new file in the `hooks/` directory (e.g., `hooks/my_hook.py`)
+2. Implement your hook function:
+
+```python
+from hook_manager import register_hook, HookContext, EventType
+import logging
+
+logger = logging.getLogger(__name__)
+
+@register_hook
+def my_hook(context: HookContext):
+    """Description of what this hook does"""
+
+    # Filter events if needed
+    if context.event_type != EventType.CLIENT_ADDED:
+        return
+
+    # Your hook logic here
+    # Access context.config, context.session_factory, context.client_data
+    logger.info("My hook executed")
+```
+
+3. Import your hook in `hooks/__init__.py`:
+
+```python
+from . import my_hook
+```
+
+4. Done! Your hook will automatically run on client events.
+
+### Available Events
+
+- `EventType.STARTUP`: Application startup
+- `EventType.CLIENT_ADDED`: New client registered
+- `EventType.CLIENT_HOSTNAME_CHANGED`: Client hostname updated
+- `EventType.CLIENT_REMOVED`: Client pruned or removed
+
+### Existing Hooks
+
+- `hooks/hosts_file.py`: Generates `/run/wg_fleet_hosts` for hostname resolution
+
+### Hook Behavior
+
+- Hooks execute sequentially in registration order
+- If a hook fails, the error is logged and execution continues with remaining hooks
+- Each hook receives a `HookContext` with configuration, database session factory, and event metadata
+
 ## Hosts File Integration
 
 wg-fleet generates `/run/wg_fleet_hosts` with entries for all clients that have hostnames:
