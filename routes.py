@@ -12,7 +12,8 @@ import logging
 
 from models import Client
 import wireguard
-import hosts
+from hook_manager import trigger_hooks, EventType, HookContext
+import hooks  # Import to register hooks
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +217,16 @@ async def ping_client(
 
     # Regenerate hosts file if hostname changed
     if hostname_changed:
-        hosts.regenerate_hosts_file(app_config, _session_factory)
+        trigger_hooks(EventType.CLIENT_HOSTNAME_CHANGED, HookContext(
+            event_type=EventType.CLIENT_HOSTNAME_CHANGED,
+            config=app_config,
+            session_factory=_session_factory,
+            client_data={
+                'ip': client_ip,
+                'hostname': unique_hostname,
+                'fleet_id': fleet_name
+            }
+        ))
 
     return PingResponse(status="ok")
 

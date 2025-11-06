@@ -72,8 +72,8 @@ def test_register_nonexistent_fleet(test_app):
     response = test_client.post('/fleet/nonexistent/register')
     assert response.status_code == 404
 
-@patch('routes.hosts')
-def test_ping_client_without_hostname(mock_hosts, test_app):
+@patch('routes.trigger_hooks')
+def test_ping_client_without_hostname(mock_trigger_hooks, test_app):
     """Test ping without hostname updates timestamp"""
     from datetime import datetime, UTC
     import asyncio
@@ -114,12 +114,13 @@ def test_ping_client_without_hostname(mock_hosts, test_app):
         updated = session.query(DBClient).filter_by(assigned_ip=assigned_ip).first()
         assert updated.timestamp > datetime(2020, 1, 1)
 
-@patch('routes.hosts')
-def test_ping_with_hostname(mock_hosts, test_app):
+@patch('routes.trigger_hooks')
+def test_ping_with_hostname(mock_trigger_hooks, test_app):
     """Test ping with hostname assignment"""
     from datetime import datetime, UTC
     import asyncio
     from routes import ping_client, PingRequest
+    from hook_manager import EventType
     test_client, config, session_factory = test_app
 
     # Pre-create a client
@@ -156,15 +157,17 @@ def test_ping_with_hostname(mock_hosts, test_app):
         updated = session.query(DBClient).filter_by(assigned_ip=assigned_ip).first()
         assert updated.hostname == 'testhost'
 
-    # Verify hosts file regenerated
-    mock_hosts.regenerate_hosts_file.assert_called_once()
+    # Verify hooks triggered
+    mock_trigger_hooks.assert_called_once()
+    assert mock_trigger_hooks.call_args[0][0] == EventType.CLIENT_HOSTNAME_CHANGED
 
-@patch('routes.hosts')
-def test_ping_hostname_deduplication(mock_hosts, test_app):
+@patch('routes.trigger_hooks')
+def test_ping_hostname_deduplication(mock_trigger_hooks, test_app):
     """Test duplicate hostname gets numbered"""
     from datetime import datetime, UTC
     import asyncio
     from routes import ping_client, PingRequest
+    from hook_manager import EventType
     test_client, config, session_factory = test_app
 
     # Pre-create two clients
@@ -206,4 +209,8 @@ def test_ping_hostname_deduplication(mock_hosts, test_app):
     # Verify hostname got numbered
     with session_factory() as session:
         updated = session.query(DBClient).filter_by(assigned_ip="fd00::101").first()
-        assert updated.hostname == 'myhost2'
+        assert updated.hostname == 'myhost--2'
+
+    # Verify hooks triggered
+    mock_trigger_hooks.assert_called_once()
+    assert mock_trigger_hooks.call_args[0][0] == EventType.CLIENT_HOSTNAME_CHANGED
