@@ -45,9 +45,9 @@ def test_db_with_stale_clients():
 
     os.unlink(db_path)
 
+@patch('pruning.trigger_hooks')
 @patch('pruning.wireguard')
-@patch('pruning.hosts')
-def test_prune_stale_clients(mock_hosts, mock_wg, test_db_with_stale_clients):
+def test_prune_stale_clients(mock_wg, mock_trigger, test_db_with_stale_clients):
     """Test pruning removes stale clients"""
     session_factory, db_path = test_db_with_stale_clients
 
@@ -79,12 +79,14 @@ def test_prune_stale_clients(mock_hosts, mock_wg, test_db_with_stale_clients):
         assert len(remaining) == 1
         assert remaining[0].public_key == 'active_key'
 
-    # Verify hosts file regenerated
-    mock_hosts.regenerate_hosts_file.assert_called_once()
+    # Verify hooks triggered
+    mock_trigger.assert_called_once()
+    from hook_manager import EventType
+    assert mock_trigger.call_args[0][0] == EventType.CLIENT_REMOVED
 
+@patch('pruning.trigger_hooks')
 @patch('pruning.wireguard')
-@patch('pruning.hosts')
-def test_prune_never_connected_stale_clients(mock_hosts, mock_wg, test_db_with_stale_clients):
+def test_prune_never_connected_stale_clients(mock_wg, mock_trigger, test_db_with_stale_clients):
     """Test pruning removes clients that never connected but are stale"""
     session_factory, db_path = test_db_with_stale_clients
 
@@ -132,5 +134,7 @@ def test_prune_never_connected_stale_clients(mock_hosts, mock_wg, test_db_with_s
         assert 'stale_key' in remaining_keys
         assert 'never_connected_key' not in remaining_keys
 
-    # Verify hosts file regenerated
-    mock_hosts.regenerate_hosts_file.assert_called_once()
+    # Verify hooks triggered
+    mock_trigger.assert_called_once()
+    from hook_manager import EventType
+    assert mock_trigger.call_args[0][0] == EventType.CLIENT_REMOVED

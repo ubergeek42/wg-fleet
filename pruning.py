@@ -5,7 +5,8 @@ import logging
 from models import Client
 from config import parse_duration
 import wireguard
-import hosts
+from hook_manager import trigger_hooks, EventType, HookContext
+import hooks
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,14 @@ def prune_stale_clients_once(config, session_factory) -> int:
         except Exception as e:
             logger.error(f"Error pruning fleet {fleet_name}: {e}", exc_info=True)
 
-    # Regenerate hosts file after pruning
+    # Trigger hooks after pruning
     if prune_count > 0:
-        hosts.regenerate_hosts_file(config, session_factory)
+        trigger_hooks(EventType.CLIENT_REMOVED, HookContext(
+            event_type=EventType.CLIENT_REMOVED,
+            config=config,
+            session_factory=session_factory,
+            client_data={'count': prune_count}
+        ))
 
     return prune_count
 
