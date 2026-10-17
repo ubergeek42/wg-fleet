@@ -3,6 +3,14 @@ import logging
 from hook_manager import register_hook, HookContext, EventType, trigger_hooks, _hook_registry
 
 
+@pytest.fixture(autouse=True)
+def restore_hook_registry():
+    """Tests here clear the global registry; restore the real hooks afterwards"""
+    saved = list(_hook_registry)
+    yield
+    _hook_registry[:] = saved
+
+
 def test_register_hook_decorator():
     """Test that @register_hook adds function to registry"""
     # Clear registry for test isolation
