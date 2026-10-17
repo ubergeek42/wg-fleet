@@ -83,7 +83,9 @@ fleets:
 
 - `domain`: Base domain for generating FQDNs (hostname.fleet.domain)
 - `prune_timeout`: Duration string for client inactivity timeout (e.g., "30m", "1h", "2h30m")
-- `fleets`: Dictionary of fleet configurations
+- `fleets`: Dictionary of fleet configurations. Fleet names must be 1-12 characters of
+  lowercase letters, digits, or `-` (the name becomes the interface `wg_<name>`, which
+  Linux limits to 15 characters)
   - `ip6`: Server's IPv6 address for this fleet
   - `subnet`: IPv6 subnet for client allocation (CIDR notation)
   - `external_ip`: Public IP address clients connect to
@@ -95,6 +97,8 @@ The `prune_timeout` field accepts duration strings:
 - `30m` - 30 minutes
 - `1h` - 1 hour
 - `2h30m` - 2 hours 30 minutes
+
+Only hours and minutes are supported, in that order. An invalid value is rejected when the config is loaded.
 
 ### Database Setup
 
@@ -191,7 +195,9 @@ sudo journalctl -u wg-fleet -f
 ```json
 {
   "status": "success",
-  "config": "[Interface]\nPrivateKey = ...\nAddress = fd00::1234\n\n[Peer]\nPublicKey = ...\nEndpoint = 1.2.3.4:51820\nAllowedIPs = fd00::1/128\nPersistentKeepalive = 25\n"
+  "config": "[Interface]\nPrivateKey = ...\nAddress = fd00::1234/64\n\n[Peer]\nPublicKey = ...\nEndpoint = 1.2.3.4:51820\nAllowedIPs = fd00::1/128\nPersistentKeepalive = 25\n",
+  "port": 51820,
+  "server_ip": "fd00::1"
 }
 ```
 
@@ -228,8 +234,9 @@ sudo wg-quick up ./wg0.conf
 
 **Requirements:**
 - Must be called from an IP within the fleet's subnet (via WireGuard tunnel)
-- Hostname must match regex: `[a-z0-9_-]+`
-- Duplicate hostnames will be automatically numbered (e.g., excavator2, excavator3)
+- Hostname must be 1-63 characters matching `[a-z0-9_-]`
+- Duplicate hostnames will be automatically numbered (e.g., excavator--2, excavator--3).
+  A client keeps its numbered name on later pings that request the same base name.
 
 **Example:**
 ```bash
@@ -378,6 +385,8 @@ from . import my_hook
 ### Existing Hooks
 
 - `hooks/hosts_file.py`: Generates `/run/wg_fleet_hosts` for hostname resolution
+- `hooks/prometheus_sd.py`: Generates `/run/prometheus_targets.json` (Prometheus file-based service discovery, node_exporter on port 9100)
+- `hooks/ansible_inventory.py`: Generates `/run/ansible_inventory.yml` with one group per fleet
 
 ### Hook Behavior
 
@@ -412,7 +421,7 @@ For dynamic integration, you could use a cron job to periodically merge the flee
 
 Install test dependencies:
 ```bash
-pip install pytest pytest-asyncio
+pip install -r requirements-dev.txt
 ```
 
 Run all tests:
@@ -433,7 +442,7 @@ pytest --cov=. --cov-report=html
 ### Test Structure
 
 The test suite includes:
-- **Unit tests**: `test_config.py`, `test_database.py`, `test_command.py`, `test_wireguard.py`, `test_hosts.py`, `test_pruning.py`, `test_main.py`
+- **Unit tests**: `test_config.py`, `test_database.py`, `test_command.py`, `test_wireguard.py`, `test_hook_manager.py`, `test_hooks.py`, `test_pruning.py`, `test_main.py`
 - **API tests**: `test_routes.py`
 - **Integration tests**: `test_integration.py`
 
@@ -475,13 +484,16 @@ curl http://server:8000/
 
 ### Client gets pruned
 
+Pruning is based on the WireGuard handshake time. A client whose last handshake is older
+than `prune_timeout` is removed. A client that has never completed a handshake is removed
+once its registration/ping timestamp is older than `prune_timeout`.
+
 **Causes:**
-- Not pinging regularly
-- WireGuard handshake timeout (no traffic through tunnel)
+- WireGuard handshake timeout (tunnel down, or no traffic through it)
+- Registered but never brought the tunnel up
 
 **Solution:**
-- Set up periodic ping (see Client Usage section)
-- Ensure traffic flows through tunnel periodically
+- Make sure the tunnel is up; the generated config's `PersistentKeepalive = 25` keeps handshakes fresh
 - Increase `prune_timeout` in config if needed
 
 ### Hostname not appearing
