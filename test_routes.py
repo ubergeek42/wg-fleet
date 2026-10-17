@@ -38,9 +38,10 @@ def test_app():
 
     os.unlink(db_path)
 
+@patch('routes.trigger_hooks')
 @patch('routes.wireguard')
 @patch('routes.allocate_random_ip')
-def test_register_client(mock_allocate_ip, mock_wg, test_app):
+def test_register_client(mock_allocate_ip, mock_wg, mock_trigger_hooks, test_app):
     """Test client registration endpoint"""
     test_client, config, session_factory = test_app
 
@@ -64,6 +65,11 @@ def test_register_client(mock_allocate_ip, mock_wg, test_app):
         assert db_client.fleet_id == 'testfleet'
         assert db_client.public_key == 'client_pub'
         assert db_client.assigned_ip == 'fd00::1234'
+
+    # Verify hooks triggered
+    from hook_manager import EventType
+    mock_trigger_hooks.assert_called_once()
+    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_ADDED
 
 def test_register_nonexistent_fleet(test_app):
     """Test registration with invalid fleet returns 404"""
