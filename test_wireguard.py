@@ -71,6 +71,7 @@ def test_create_interface_config():
         assert 'Address = fd00::1/64' in content  # Should include prefix length from subnet
         assert 'ListenPort = 51820' in content
         assert 'PrivateKey = test_private_key' in content
+        assert config_path.stat().st_mode & 0o777 == 0o600
 
 @patch('wireguard.run_command')
 def test_list_peers(mock_run_command):

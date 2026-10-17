@@ -1,9 +1,9 @@
 from command import run_command
-from pathlib import Path
 from datetime import datetime, UTC
 from typing import Dict, List, Tuple
 import logging
 import ipaddress
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,11 @@ ListenPort = {fleet_config.port}
 PrivateKey = {private_key}
 """
 
-    config_file = Path(config_path)
-    config_file.write_text(config_content)
-    config_file.chmod(0o400)
+    # Create with restrictive permissions up front so the private key is never world-readable
+    fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(config_content)
     logger.info(f"Created WireGuard config: {config_path}")
 
 def interface_exists(fleet_name: str) -> bool:
