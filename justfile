@@ -4,9 +4,9 @@
 default:
     @just --list
 
-# Install Python dependencies
+# Install Python dependencies (including test dependencies)
 install:
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
 
 # Run the fleet server with default config
 run: check-root
@@ -38,11 +38,11 @@ test-integration:
 
 # Check code formatting with black (if installed)
 format:
-    black *.py
+    black *.py hooks/
 
 # Lint code with ruff (if installed)
 lint:
-    ruff check *.py
+    ruff check *.py hooks/
 
 # Check if running as root (required for WireGuard management)
 check-root:
@@ -92,7 +92,7 @@ logs:
 
 # View database contents
 show-db:
-    sqlite3 clients.db "SELECT fleet_id, hostname, assigned_ip, timestamp FROM clients ORDER BY fleet_id, timestamp DESC;"
+    sqlite3 /var/lib/wg-fleet/clients.db "SELECT fleet_id, hostname, assigned_ip, timestamp FROM clients ORDER BY fleet_id, timestamp DESC;"
 
 # Create example systemd service file
 create-service:
@@ -112,10 +112,6 @@ create-service:
     @echo "WantedBy=multi-user.target" >> wg-fleet.service
     @echo "Created wg-fleet.service - copy to /etc/systemd/system/ and enable with systemctl"
 
-# Development server with auto-reload (WARNING: requires root)
-dev: check-root
-    uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
 # Container management
 
 # Build the container image
@@ -124,6 +120,7 @@ build-container:
 
 # Run container in privileged mode on host network with default config
 run-container: build-container
+    mkdir -p data
     podman run --rm \
         --privileged \
         --network host \
@@ -131,13 +128,14 @@ run-container: build-container
         --cap-add SYS_MODULE \
         -v /etc/wg-fleet.yaml:/etc/wg-fleet.yaml:ro \
         -v /etc/wireguard:/etc/wireguard \
-        -v $(pwd)/clients.db:/app/clients.db \
+        -v $(pwd)/data:/var/lib/wg-fleet \
         -v /run:/run \
         --name wg-fleet \
         wg-fleet:latest
 
 # Run container with example config
 run-container-example: build-container
+    mkdir -p data
     podman run --rm \
         --privileged \
         --network host \
@@ -145,13 +143,14 @@ run-container-example: build-container
         --cap-add SYS_MODULE \
         -v $(pwd)/example-config.yaml:/etc/wg-fleet.yaml:ro \
         -v /etc/wireguard:/etc/wireguard \
-        -v $(pwd)/clients.db:/app/clients.db \
+        -v $(pwd)/data:/var/lib/wg-fleet \
         -v /run:/run \
         --name wg-fleet \
         wg-fleet:latest
 
 # Run container with custom config
 run-container-config CONFIG: build-container
+    mkdir -p data
     podman run --rm \
         --privileged \
         --network host \
@@ -159,13 +158,14 @@ run-container-config CONFIG: build-container
         --cap-add SYS_MODULE \
         -v {{CONFIG}}:/etc/wg-fleet.yaml:ro \
         -v /etc/wireguard:/etc/wireguard \
-        -v $(pwd)/clients.db:/app/clients.db \
+        -v $(pwd)/data:/var/lib/wg-fleet \
         -v /run:/run \
         --name wg-fleet \
         wg-fleet:latest
 
 # Run container in detached mode
 run-container-daemon: build-container
+    mkdir -p data
     podman run -d \
         --privileged \
         --network host \
@@ -173,7 +173,7 @@ run-container-daemon: build-container
         --cap-add SYS_MODULE \
         -v /etc/wg-fleet.yaml:/etc/wg-fleet.yaml:ro \
         -v /etc/wireguard:/etc/wireguard \
-        -v $(pwd)/clients.db:/app/clients.db \
+        -v $(pwd)/data:/var/lib/wg-fleet \
         -v /run:/run \
         --name wg-fleet \
         --restart always \
