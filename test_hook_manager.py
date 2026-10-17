@@ -33,7 +33,7 @@ def test_hook_receives_context():
         session_factory=lambda: None
     )
 
-    trigger_hooks(EventType.CLIENT_ADDED, context)
+    trigger_hooks(context)
 
     assert called_with['event_type'] == EventType.CLIENT_ADDED
     assert called_with['config'] == config
@@ -64,7 +64,7 @@ def test_hook_continues_on_error():
     )
 
     # Should not raise exception
-    trigger_hooks(EventType.CLIENT_ADDED, context)
+    trigger_hooks(context)
 
     # All hooks should execute
     assert execution_order == ['first', 'failing', 'third']
@@ -85,7 +85,7 @@ def test_hook_error_logging(caplog):
     )
 
     with caplog.at_level(logging.ERROR):
-        trigger_hooks(EventType.CLIENT_ADDED, context)
+        trigger_hooks(context)
 
     assert "error_hook" in caplog.text
     assert "Test error" in caplog.text

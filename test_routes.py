@@ -159,7 +159,7 @@ def test_ping_with_hostname(mock_trigger_hooks, test_app):
 
     # Verify hooks triggered
     mock_trigger_hooks.assert_called_once()
-    assert mock_trigger_hooks.call_args[0][0] == EventType.CLIENT_HOSTNAME_CHANGED
+    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_HOSTNAME_CHANGED
 
 @patch('routes.trigger_hooks')
 def test_ping_hostname_deduplication(mock_trigger_hooks, test_app):
@@ -213,7 +213,7 @@ def test_ping_hostname_deduplication(mock_trigger_hooks, test_app):
 
     # Verify hooks triggered
     mock_trigger_hooks.assert_called_once()
-    assert mock_trigger_hooks.call_args[0][0] == EventType.CLIENT_HOSTNAME_CHANGED
+    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_HOSTNAME_CHANGED
 
 @patch('routes.trigger_hooks')
 def test_ping_deduplicated_hostname_is_stable(mock_trigger_hooks, test_app):

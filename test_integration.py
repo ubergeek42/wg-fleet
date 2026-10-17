@@ -79,7 +79,7 @@ def test_full_client_lifecycle(mock_allocate_ip, mock_wg, mock_trigger_hooks, in
 
     # Manually trigger hooks as the ping endpoint would
     # (Note: we use the real trigger_hooks here, not the mocked one from routes)
-    real_trigger_hooks(EventType.CLIENT_HOSTNAME_CHANGED, HookContext(
+    real_trigger_hooks(HookContext(
         event_type=EventType.CLIENT_HOSTNAME_CHANGED,
         config=config,
         session_factory=session_factory,

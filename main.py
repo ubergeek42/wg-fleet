@@ -102,7 +102,7 @@ def initialize_fleets(config, session_factory):
         reconcile_fleet_state(fleet_name, session_factory)
 
     # Generate initial hosts file etc. via hook system
-    trigger_hooks(EventType.STARTUP, HookContext(
+    trigger_hooks(HookContext(
         event_type=EventType.STARTUP,
         config=config,
         session_factory=session_factory

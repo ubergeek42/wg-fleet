@@ -239,7 +239,7 @@ async def ping_client(
 
     # Regenerate hosts file if hostname changed
     if hostname_changed:
-        trigger_hooks(EventType.CLIENT_HOSTNAME_CHANGED, HookContext(
+        trigger_hooks(HookContext(
             event_type=EventType.CLIENT_HOSTNAME_CHANGED,
             config=app_config,
             session_factory=_session_factory,

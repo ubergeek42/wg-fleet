@@ -82,7 +82,7 @@ def test_prune_stale_clients(mock_wg, mock_trigger, test_db_with_stale_clients):
     # Verify hooks triggered
     mock_trigger.assert_called_once()
     from hook_manager import EventType
-    assert mock_trigger.call_args[0][0] == EventType.CLIENT_REMOVED
+    assert mock_trigger.call_args[0][0].event_type == EventType.CLIENT_REMOVED
 
 @patch('pruning.trigger_hooks')
 @patch('pruning.wireguard')
@@ -137,4 +137,4 @@ def test_prune_never_connected_stale_clients(mock_wg, mock_trigger, test_db_with
     # Verify hooks triggered
     mock_trigger.assert_called_once()
     from hook_manager import EventType
-    assert mock_trigger.call_args[0][0] == EventType.CLIENT_REMOVED
+    assert mock_trigger.call_args[0][0].event_type == EventType.CLIENT_REMOVED

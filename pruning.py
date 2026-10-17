@@ -69,7 +69,7 @@ def prune_stale_clients_once(config, session_factory) -> int:
 
     # Trigger hooks after pruning
     if prune_count > 0:
-        trigger_hooks(EventType.CLIENT_REMOVED, HookContext(
+        trigger_hooks(HookContext(
             event_type=EventType.CLIENT_REMOVED,
             config=config,
             session_factory=session_factory,

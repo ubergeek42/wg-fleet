@@ -47,16 +47,15 @@ def register_hook(func: Callable[[HookContext], None]) -> Callable[[HookContext]
     return func
 
 
-def trigger_hooks(event_type: EventType, context: HookContext):
+def trigger_hooks(context: HookContext):
     """
-    Execute all registered hooks for the given event.
+    Execute all registered hooks for the event in the given context.
 
     Runs hooks sequentially. If a hook raises an exception,
     logs the error and continues with remaining hooks.
 
     Args:
-        event_type: The event that triggered hook execution
-        context: Context object with config, session factory, and metadata
+        context: Context object with event type, config, session factory, and metadata
     """
     errors = []
 
