@@ -214,3 +214,38 @@ def test_ping_hostname_deduplication(mock_trigger_hooks, test_app):
     # Verify hooks triggered
     mock_trigger_hooks.assert_called_once()
     assert mock_trigger_hooks.call_args[0][0] == EventType.CLIENT_HOSTNAME_CHANGED
+
+@patch('routes.trigger_hooks')
+def test_ping_deduplicated_hostname_is_stable(mock_trigger_hooks, test_app):
+    """Test repeated pings keep a deduplicated hostname instead of renaming it"""
+    from datetime import datetime, UTC
+    import asyncio
+    from routes import ping_client, PingRequest
+    test_client, config, session_factory = test_app
+
+    with session_factory() as session:
+        session.add_all([
+            DBClient(fleet_id="testfleet", public_key="key1", assigned_ip="fd00::100",
+                     http_request_ip="1.2.3.4", hostname="myhost", timestamp=datetime.now(UTC)),
+            DBClient(fleet_id="testfleet", public_key="key2", assigned_ip="fd00::101",
+                     http_request_ip="1.2.3.5", hostname=None, timestamp=datetime.now(UTC)),
+        ])
+        session.commit()
+
+    mock_request = MagicMock()
+    mock_request.client.host = "fd00::101"
+
+    for _ in range(3):
+        with session_factory() as db:
+            asyncio.run(ping_client(
+                fleet_name="testfleet",
+                ping_req=PingRequest(hostname='myhost'),
+                request=mock_request,
+                db=db
+            ))
+        with session_factory() as session:
+            updated = session.query(DBClient).filter_by(assigned_ip="fd00::101").first()
+            assert updated.hostname == 'myhost--2'
+
+    # Only the first ping changed the hostname
+    mock_trigger_hooks.assert_called_once()

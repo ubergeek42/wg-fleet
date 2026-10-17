@@ -151,6 +151,17 @@ def get_unique_hostname(session: Session, fleet_id: str, requested: str) -> str:
 
     return current
 
+def hostname_matches_request(current: Optional[str], requested: str) -> bool:
+    """
+    Check whether a client's current hostname satisfies its requested hostname.
+
+    A client that asked for "foo" and was deduplicated to "foo--2" keeps that
+    name on later pings instead of being renamed again.
+    """
+    if current is None:
+        return False
+    return re.fullmatch(rf'{re.escape(requested)}(--\d+)?', current) is not None
+
 @api_router.post("/fleet/{fleet_name}/ping", response_model=PingResponse)
 async def ping_client(
     fleet_name: str,
@@ -205,8 +216,8 @@ async def ping_client(
         if not re.match(r'^[a-z0-9_-]+$', ping_req.hostname):
             raise HTTPException(status_code=400, detail="Invalid hostname format")
 
-        # Check if different from current
-        if client_record.hostname != ping_req.hostname:
+        # Check if different from current (a deduplicated "name--N" still counts as the same name)
+        if not hostname_matches_request(client_record.hostname, ping_req.hostname):
             # Get unique hostname (handles deduplication)
             unique_hostname = get_unique_hostname(db, fleet_name, ping_req.hostname)
             client_record.hostname = unique_hostname
