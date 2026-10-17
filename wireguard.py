@@ -1,4 +1,4 @@
-from command import run_command
+from command import run_command, CommandError
 from datetime import datetime, UTC
 from typing import Dict, List, Tuple
 import logging
@@ -66,7 +66,7 @@ def interface_exists(fleet_name: str) -> bool:
     try:
         run_command(['wg', 'show', f'wg_{fleet_name}'])
         return True
-    except:
+    except CommandError:
         return False
 
 def bring_up_interface(fleet_name: str) -> None:
