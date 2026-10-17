@@ -138,3 +138,63 @@ def test_prune_never_connected_stale_clients(mock_wg, mock_trigger, test_db_with
     mock_trigger.assert_called_once()
     from hook_manager import EventType
     assert mock_trigger.call_args[0][0].event_type == EventType.CLIENT_REMOVED
+
+@patch('pruning.trigger_hooks')
+@patch('pruning.wireguard')
+def test_prune_failure_does_not_roll_back_other_clients(mock_wg, mock_trigger, test_db_with_stale_clients):
+    """Test one failed peer removal doesn't undo pruning of the others"""
+    session_factory, db_path = test_db_with_stale_clients
+    from command import CommandError
+
+    with session_factory() as session:
+        session.add(Client(fleet_id="testfleet", public_key="stale_key2", assigned_ip="fd00::102",
+                           http_request_ip="1.2.3.6", hostname="stale2", timestamp=datetime.now(UTC)))
+        session.commit()
+
+    old_handshake = datetime.now(UTC) - timedelta(hours=2)
+    mock_wg.list_peers.return_value = [
+        {'public_key': 'stale_key', 'last_handshake': old_handshake},
+        {'public_key': 'stale_key2', 'last_handshake': old_handshake},
+    ]
+    # Removing the second peer fails
+    mock_wg.remove_peer.side_effect = [None, CommandError("wg failed")]
+
+    config = MagicMock()
+    config.prune_timeout = "1h"
+    config.fleets = {'testfleet': MagicMock()}
+
+    assert prune_stale_clients_once(config, session_factory) == 1
+
+    with session_factory() as session:
+        remaining = {c.public_key for c in session.query(Client).all()}
+    # First peer's record is gone along with its peer; second peer and record both kept
+    assert remaining == {'active_key', 'stale_key2'}
+
+@patch('pruning.trigger_hooks')
+@patch('pruning.wireguard')
+def test_prune_removes_stale_records_without_peer(mock_wg, mock_trigger, test_db_with_stale_clients):
+    """Test stale records whose WireGuard peer is gone are removed, recent ones kept"""
+    session_factory, db_path = test_db_with_stale_clients
+
+    with session_factory() as session:
+        session.add(Client(fleet_id="testfleet", public_key="orphan_key", assigned_ip="fd00::103",
+                           http_request_ip="1.2.3.7", hostname="orphan",
+                           timestamp=datetime.now(UTC) - timedelta(hours=2)))
+        session.commit()
+
+    # Only active_key is in WireGuard; stale_key's record is recent, orphan_key's is old
+    mock_wg.list_peers.return_value = [
+        {'public_key': 'active_key', 'last_handshake': datetime.now(UTC)},
+    ]
+
+    config = MagicMock()
+    config.prune_timeout = "1h"
+    config.fleets = {'testfleet': MagicMock()}
+
+    assert prune_stale_clients_once(config, session_factory) == 1
+    mock_wg.remove_peer.assert_not_called()
+
+    with session_factory() as session:
+        remaining = {c.public_key for c in session.query(Client).all()}
+    assert remaining == {'active_key', 'stale_key'}
+    mock_trigger.assert_called_once()
