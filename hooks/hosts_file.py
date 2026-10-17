@@ -3,7 +3,7 @@ Hosts file generation hook.
 
 Regenerates /run/wg_fleet_hosts when clients are added/changed/removed.
 """
-from hook_manager import register_hook, HookContext, EventType
+from hook_manager import register_hook, HookContext
 from models import Client
 from pathlib import Path
 import logging
@@ -21,15 +21,7 @@ def regenerate_hosts_file_hook(context: HookContext):
     Format: <ipv6> <hostname>.<fleet>.<domain>
     Only includes clients with hostnames set.
     """
-    # Filter events - regenerate on startup and client changes
-    if context.event_type not in [
-        EventType.STARTUP,
-        EventType.CLIENT_ADDED,
-        EventType.CLIENT_HOSTNAME_CHANGED,
-        EventType.CLIENT_REMOVED
-    ]:
-        return
-
+    # Every event can change the client set, so always regenerate
     try:
         lines = []
 

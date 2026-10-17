@@ -3,7 +3,7 @@ Prometheus service discovery hook.
 
 Generates Prometheus file-based service discovery JSON when clients change.
 """
-from hook_manager import register_hook, HookContext, EventType
+from hook_manager import register_hook, HookContext
 from models import Client
 from pathlib import Path
 import json
@@ -25,15 +25,7 @@ def prometheus_sd_hook(context: HookContext):
     Target format: [<ipv6>]:9100 (node_exporter port)
     Labels: hostname, fleet, job
     """
-    # Filter events - only regenerate on client changes
-    if context.event_type not in [
-        EventType.STARTUP,
-        EventType.CLIENT_ADDED,
-        EventType.CLIENT_HOSTNAME_CHANGED,
-        EventType.CLIENT_REMOVED
-    ]:
-        return
-
+    # Every event can change the client set, so always regenerate
     try:
         targets = []
 

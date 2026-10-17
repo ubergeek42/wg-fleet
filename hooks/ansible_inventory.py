@@ -4,7 +4,7 @@ Ansible inventory hook.
 Generates Ansible YAML inventory file when clients change.
 Each fleet becomes a group, hosts are named hostname.fleetname.
 """
-from hook_manager import register_hook, HookContext, EventType
+from hook_manager import register_hook, HookContext
 from models import Client
 from pathlib import Path
 from collections import defaultdict
@@ -28,15 +28,7 @@ def ansible_inventory_hook(context: HookContext):
     Only includes clients with hostnames set.
     No ansible_host needed since hosts file hook makes names resolvable.
     """
-    # Filter events - regenerate on startup and client changes
-    if context.event_type not in [
-        EventType.STARTUP,
-        EventType.CLIENT_ADDED,
-        EventType.CLIENT_HOSTNAME_CHANGED,
-        EventType.CLIENT_REMOVED
-    ]:
-        return
-
+    # Every event can change the client set, so always regenerate
     try:
         # Build inventory structure
         # Group clients by fleet
