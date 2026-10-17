@@ -276,3 +276,23 @@ def test_ping_rejects_invalid_hostname(hostname, test_app):
                 db=db
             ))
     assert exc_info.value.status_code == 400
+
+@patch('routes.wireguard')
+@patch('routes.allocate_random_ip')
+def test_register_removes_peer_when_db_save_fails(mock_allocate_ip, mock_wg, test_app):
+    """Test a failed registration doesn't leave an orphaned WireGuard peer"""
+    test_client, config, session_factory = test_app
+
+    mock_allocate_ip.return_value = 'fd00::1234'
+    mock_wg.generate_keypair.return_value = ('client_priv', 'client_pub')
+    mock_wg.get_server_public_key.return_value = 'server_pub'
+    mock_wg.build_client_config.return_value = '[Interface]'
+
+    with patch('sqlalchemy.orm.Session.commit', side_effect=RuntimeError('db locked')):
+        response = test_client.post('/fleet/testfleet/register')
+
+    assert response.status_code == 500
+    mock_wg.add_peer.assert_called_once_with('testfleet', 'client_pub', 'fd00::1234')
+    mock_wg.remove_peer.assert_called_once_with('testfleet', 'client_pub')
+    with session_factory() as session:
+        assert session.query(DBClient).count() == 0

@@ -69,15 +69,17 @@ async def register_client(
     1. Validate fleet exists
     2. Generate keypair
     3. Allocate random IPv6
-    4. Add peer to WireGuard
-    5. Save to database
-    6. Return WireGuard config
+    4. Build client config
+    5. Add peer to WireGuard
+    6. Save to database (removing the peer again if this fails)
+    7. Return WireGuard config
     """
     # Validate fleet exists
     if fleet_name not in app_config.fleets:
         raise HTTPException(status_code=404, detail=f"Fleet '{fleet_name}' not found")
 
     fleet_config = app_config.fleets[fleet_name]
+    peer_added = False
 
     try:
         # Generate client keypair
@@ -86,8 +88,21 @@ async def register_client(
         # Allocate random IPv6
         client_ip = allocate_random_ip(fleet_config.subnet)
 
+        # Build client config
+        server_pubkey = wireguard.get_server_public_key(fleet_name)
+        config_text = wireguard.build_client_config(
+            client_private_key=client_private,
+            client_ip=client_ip,
+            server_public_key=server_pubkey,
+            endpoint_ip=fleet_config.external_ip,
+            endpoint_port=fleet_config.port,
+            server_ip=fleet_config.ip6,
+            subnet=fleet_config.subnet
+        )
+
         # Add peer to WireGuard
         wireguard.add_peer(fleet_name, client_public, client_ip)
+        peer_added = True
 
         # Save to database
         client_record = Client(
@@ -103,18 +118,6 @@ async def register_client(
 
         logger.info(f"Client registered: fleet={fleet_name}, ip={client_ip}, source={request.client.host}")
 
-        # Build client config
-        server_pubkey = wireguard.get_server_public_key(fleet_name)
-        config_text = wireguard.build_client_config(
-            client_private_key=client_private,
-            client_ip=client_ip,
-            server_public_key=server_pubkey,
-            endpoint_ip=fleet_config.external_ip,
-            endpoint_port=fleet_config.port,
-            server_ip=fleet_config.ip6,
-            subnet=fleet_config.subnet
-        )
-
         return RegisterResponse(
             status="success",
             config=config_text,
@@ -124,6 +127,13 @@ async def register_client(
 
     except Exception as e:
         logger.error(f"Registration failed: {e}", exc_info=True)
+        db.rollback()
+        if peer_added:
+            # Don't leave a WireGuard peer behind for a client that never got its config
+            try:
+                wireguard.remove_peer(fleet_name, client_public)
+            except Exception as cleanup_error:
+                logger.error(f"Failed to remove peer after registration failure: {cleanup_error}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 def get_unique_hostname(session: Session, fleet_id: str, requested: str) -> str:
