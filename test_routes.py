@@ -213,7 +213,7 @@ def test_ping_reclaims_plain_hostname_once_free(mock_trigger_hooks, test_app):
         assert hostname_of(session_factory, "fd00::101") == 'myhost'
     mock_trigger_hooks.assert_called_once()
 
-@pytest.mark.parametrize('hostname', ['bad\n', 'UPPER', 'has.dot', 'a' * 64])
+@pytest.mark.parametrize('hostname', ['bad\n', 'UPPER', 'has.dot', 'a' * 60, '-oProxyCommand', 'trailing-'])
 def test_ping_rejects_invalid_hostname(hostname, test_app):
     """Test hostnames with invalid characters or length are rejected"""
     test_client, config, session_factory = test_app
@@ -221,3 +221,13 @@ def test_ping_rejects_invalid_hostname(hostname, test_app):
 
     assert ping(test_client, "fd00::100", hostname).status_code == 400
     assert hostname_of(session_factory, "fd00::100") is None
+
+@pytest.mark.parametrize('hostname', ['a', 'web-01', 'lab_pc3', 'a' * 59])
+@patch('routes.trigger_hooks')
+def test_ping_accepts_valid_hostname(mock_trigger_hooks, hostname, test_app):
+    """Test valid hostnames, including the maximum length, are accepted"""
+    test_client, config, session_factory = test_app
+    add_client(session_factory, "key1", "fd00::100")
+
+    assert ping(test_client, "fd00::100", hostname).status_code == 200
+    assert hostname_of(session_factory, "fd00::100") == hostname

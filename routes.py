@@ -237,8 +237,10 @@ async def ping_client(
     hostname_changed = False
     if ping_req.hostname:
         # Validate hostname format
-        # fullmatch, not match with $, which would accept a trailing newline
-        if not re.fullmatch(r'[a-z0-9_-]{1,63}', ping_req.hostname):
+        # fullmatch, not match with $, which would accept a trailing newline.
+        # No leading/trailing '-' (a leading '-' looks like an option to ssh/ansible), and at
+        # most 59 chars so a dedup suffix like "--99" stays within the 63-char DNS label limit.
+        if not re.fullmatch(r'[a-z0-9_]([a-z0-9_-]{0,57}[a-z0-9_])?', ping_req.hostname):
             raise HTTPException(status_code=400, detail="Invalid hostname format")
 
         unique_hostname = None

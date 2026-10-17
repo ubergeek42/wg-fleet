@@ -234,7 +234,7 @@ sudo wg-quick up ./wg0.conf
 
 **Requirements:**
 - Must be called from an IP within the fleet's subnet (via WireGuard tunnel)
-- Hostname must be 1-63 characters matching `[a-z0-9_-]`
+- Hostname must be 1-59 characters of `[a-z0-9_-]`, not starting or ending with `-`
 - Duplicate hostnames will be automatically numbered (e.g., excavator--2, excavator--3).
   A client keeps its numbered name on later pings that request the same base name.
 
