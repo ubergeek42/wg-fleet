@@ -38,12 +38,10 @@ def integration_app():
 
     os.unlink(db_path)
 
-@patch('routes.trigger_hooks')
 @patch('routes.wireguard')
 @patch('routes.allocate_random_ip')
-def test_full_client_lifecycle(mock_allocate_ip, mock_wg, mock_trigger_hooks, integration_app):
-    """Test full client lifecycle: register -> ping -> verify dashboard"""
-    from hook_manager import EventType
+def test_full_client_lifecycle(mock_allocate_ip, mock_wg, integration_app, hook_output_paths):
+    """Test full client lifecycle: register -> ping with hostname -> hooks -> dashboard"""
     client, config, session_factory = integration_app
 
     # Mock WireGuard operations
@@ -59,39 +57,19 @@ def test_full_client_lifecycle(mock_allocate_ip, mock_wg, mock_trigger_hooks, in
     data = response.json()
     assert data['status'] == 'success'
 
-    # 2. Ping from client
-    # Note: TestClient doesn't properly handle X-Forwarded-For headers.
-    # Instead of using TestClient for the ping (which would require complex mocking),
-    # we'll directly test the ping functionality by updating the DB and verifying hooks
-    from models import Client as ClientModel
-    from datetime import datetime, UTC
-    from hook_manager import trigger_hooks as real_trigger_hooks, EventType, HookContext
+    # 2. Ping from the client's assigned address, setting a hostname
+    tunnel_client = TestClient(client.app, client=('fd00::1234', 12345))
+    response = tunnel_client.post('/fleet/testfleet/ping', json={'hostname': 'testmachine'})
+    assert response.status_code == 200
 
-    # Directly update the client hostname in DB to simulate a successful ping
     with session_factory() as db:
-        client_record = db.query(ClientModel).filter_by(assigned_ip='fd00::1234').first()
-        assert client_record is not None
-
-        # Simulate what the ping endpoint does: update hostname and trigger hooks
-        client_record.hostname = 'testmachine'
-        client_record.timestamp = datetime.now(UTC)
-        db.commit()
-
-    # Manually trigger hooks as the ping endpoint would
-    # (Note: we use the real trigger_hooks here, not the mocked one from routes)
-    real_trigger_hooks(HookContext(
-        event_type=EventType.CLIENT_HOSTNAME_CHANGED,
-        config=config,
-        session_factory=session_factory,
-        client_data={'ip': 'fd00::1234', 'hostname': 'testmachine', 'fleet_id': 'testfleet'}
-    ))
-
-    # Verify the hostname was set correctly
-    with session_factory() as db:
-        client_record = db.query(ClientModel).filter_by(assigned_ip='fd00::1234').first()
+        client_record = db.query(Client).filter_by(assigned_ip='fd00::1234').one()
         assert client_record.hostname == 'testmachine'
 
-    # 3. Check dashboard shows client
+    # 3. Real hooks regenerated the hosts file
+    assert hook_output_paths['hosts'].read_text() == 'fd00::1234 testmachine.testfleet.test.internal\n'
+
+    # 4. Check dashboard shows client
     response = client.get('/fleet/testfleet')
     assert response.status_code == 200
     assert 'testmachine' in response.text

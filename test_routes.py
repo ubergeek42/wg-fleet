@@ -78,211 +78,6 @@ def test_register_nonexistent_fleet(test_app):
     response = test_client.post('/fleet/nonexistent/register')
     assert response.status_code == 404
 
-@patch('routes.trigger_hooks')
-def test_ping_client_without_hostname(mock_trigger_hooks, test_app):
-    """Test ping without hostname updates timestamp"""
-    from datetime import datetime, UTC
-    import asyncio
-    from routes import ping_client, PingRequest
-    test_client, config, session_factory = test_app
-
-    # Pre-create a client
-    with session_factory() as session:
-        existing = DBClient(
-            fleet_id="testfleet",
-            public_key="test_key",
-            assigned_ip="fd00::100",
-            http_request_ip="1.2.3.4",
-            hostname=None,
-            timestamp=datetime(2020, 1, 1)
-        )
-        session.add(existing)
-        session.commit()
-        assigned_ip = existing.assigned_ip
-
-    # Create mock request with correct client IP
-    mock_request = MagicMock()
-    mock_request.client.host = assigned_ip
-    mock_request.headers.get.return_value = None  # No X-Forwarded-For header
-
-    with session_factory() as db:
-        result = asyncio.run(ping_client(
-            fleet_name="testfleet",
-            ping_req=PingRequest(hostname=None),
-            request=mock_request,
-            db=db
-        ))
-
-        assert result.status == 'ok'
-
-    # Verify timestamp updated
-    with session_factory() as session:
-        updated = session.query(DBClient).filter_by(assigned_ip=assigned_ip).first()
-        assert updated.timestamp > datetime(2020, 1, 1)
-
-@patch('routes.trigger_hooks')
-def test_ping_with_hostname(mock_trigger_hooks, test_app):
-    """Test ping with hostname assignment"""
-    from datetime import datetime, UTC
-    import asyncio
-    from routes import ping_client, PingRequest
-    from hook_manager import EventType
-    test_client, config, session_factory = test_app
-
-    # Pre-create a client
-    with session_factory() as session:
-        existing = DBClient(
-            fleet_id="testfleet",
-            public_key="test_key",
-            assigned_ip="fd00::100",
-            http_request_ip="1.2.3.4",
-            hostname=None,
-            timestamp=datetime.now(UTC)
-        )
-        session.add(existing)
-        session.commit()
-        assigned_ip = existing.assigned_ip
-
-    # Create mock request with correct client IP
-    mock_request = MagicMock()
-    mock_request.client.host = assigned_ip
-    mock_request.headers.get.return_value = None  # No X-Forwarded-For header
-
-    with session_factory() as db:
-        result = asyncio.run(ping_client(
-            fleet_name="testfleet",
-            ping_req=PingRequest(hostname='testhost'),
-            request=mock_request,
-            db=db
-        ))
-
-        assert result.status == 'ok'
-
-    # Verify hostname set
-    with session_factory() as session:
-        updated = session.query(DBClient).filter_by(assigned_ip=assigned_ip).first()
-        assert updated.hostname == 'testhost'
-
-    # Verify hooks triggered
-    mock_trigger_hooks.assert_called_once()
-    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_HOSTNAME_CHANGED
-
-@patch('routes.trigger_hooks')
-def test_ping_hostname_deduplication(mock_trigger_hooks, test_app):
-    """Test duplicate hostname gets numbered"""
-    from datetime import datetime, UTC
-    import asyncio
-    from routes import ping_client, PingRequest
-    from hook_manager import EventType
-    test_client, config, session_factory = test_app
-
-    # Pre-create two clients
-    with session_factory() as session:
-        client1 = DBClient(
-            fleet_id="testfleet",
-            public_key="key1",
-            assigned_ip="fd00::100",
-            http_request_ip="1.2.3.4",
-            hostname="myhost",
-            timestamp=datetime.now(UTC)
-        )
-        client2 = DBClient(
-            fleet_id="testfleet",
-            public_key="key2",
-            assigned_ip="fd00::101",
-            http_request_ip="1.2.3.5",
-            hostname=None,
-            timestamp=datetime.now(UTC)
-        )
-        session.add_all([client1, client2])
-        session.commit()
-
-    # Create mock request with correct client IP
-    mock_request = MagicMock()
-    mock_request.client.host = "fd00::101"
-    mock_request.headers.get.return_value = None  # No X-Forwarded-For header
-
-    with session_factory() as db:
-        result = asyncio.run(ping_client(
-            fleet_name="testfleet",
-            ping_req=PingRequest(hostname='myhost'),
-            request=mock_request,
-            db=db
-        ))
-
-        assert result.status == 'ok'
-
-    # Verify hostname got numbered
-    with session_factory() as session:
-        updated = session.query(DBClient).filter_by(assigned_ip="fd00::101").first()
-        assert updated.hostname == 'myhost--2'
-
-    # Verify hooks triggered
-    mock_trigger_hooks.assert_called_once()
-    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_HOSTNAME_CHANGED
-
-@patch('routes.trigger_hooks')
-def test_ping_deduplicated_hostname_is_stable(mock_trigger_hooks, test_app):
-    """Test repeated pings keep a deduplicated hostname instead of renaming it"""
-    from datetime import datetime, UTC
-    import asyncio
-    from routes import ping_client, PingRequest
-    test_client, config, session_factory = test_app
-
-    with session_factory() as session:
-        session.add_all([
-            DBClient(fleet_id="testfleet", public_key="key1", assigned_ip="fd00::100",
-                     http_request_ip="1.2.3.4", hostname="myhost", timestamp=datetime.now(UTC)),
-            DBClient(fleet_id="testfleet", public_key="key2", assigned_ip="fd00::101",
-                     http_request_ip="1.2.3.5", hostname=None, timestamp=datetime.now(UTC)),
-        ])
-        session.commit()
-
-    mock_request = MagicMock()
-    mock_request.client.host = "fd00::101"
-
-    for _ in range(3):
-        with session_factory() as db:
-            asyncio.run(ping_client(
-                fleet_name="testfleet",
-                ping_req=PingRequest(hostname='myhost'),
-                request=mock_request,
-                db=db
-            ))
-        with session_factory() as session:
-            updated = session.query(DBClient).filter_by(assigned_ip="fd00::101").first()
-            assert updated.hostname == 'myhost--2'
-
-    # Only the first ping changed the hostname
-    mock_trigger_hooks.assert_called_once()
-
-@pytest.mark.parametrize('hostname', ['bad\n', 'UPPER', 'has.dot', 'a' * 64])
-def test_ping_rejects_invalid_hostname(hostname, test_app):
-    """Test hostnames with invalid characters or length are rejected"""
-    from datetime import datetime, UTC
-    import asyncio
-    from fastapi import HTTPException
-    from routes import ping_client, PingRequest
-    test_client, config, session_factory = test_app
-
-    with session_factory() as session:
-        session.add(DBClient(fleet_id="testfleet", public_key="key1", assigned_ip="fd00::100",
-                             http_request_ip="1.2.3.4", hostname=None, timestamp=datetime.now(UTC)))
-        session.commit()
-
-    mock_request = MagicMock()
-    mock_request.client.host = "fd00::100"
-
-    with session_factory() as db:
-        with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(ping_client(
-                fleet_name="testfleet",
-                ping_req=PingRequest(hostname=hostname),
-                request=mock_request,
-                db=db
-            ))
-    assert exc_info.value.status_code == 400
-
 @patch('routes.wireguard')
 @patch('routes.allocate_random_ip')
 def test_register_removes_peer_when_db_save_fails(mock_allocate_ip, mock_wg, test_app):
@@ -303,46 +98,126 @@ def test_register_removes_peer_when_db_save_fails(mock_allocate_ip, mock_wg, tes
     with session_factory() as session:
         assert session.query(DBClient).count() == 0
 
+def add_client(session_factory, public_key, ip, hostname=None):
+    """Insert a client record directly"""
+    from datetime import datetime, UTC
+    with session_factory() as session:
+        session.add(DBClient(fleet_id="testfleet", public_key=public_key, assigned_ip=ip,
+                             http_request_ip="1.2.3.4", hostname=hostname,
+                             timestamp=datetime(2020, 1, 1)))
+        session.commit()
+
+def ping(test_client, ip, hostname=None, fleet='testfleet'):
+    """POST to the ping endpoint as if from the given source IP"""
+    client = TestClient(test_client.app, client=(ip, 12345))
+    body = {'hostname': hostname} if hostname is not None else {}
+    return client.post(f'/fleet/{fleet}/ping', json=body)
+
+def hostname_of(session_factory, ip):
+    with session_factory() as session:
+        return session.query(DBClient).filter_by(assigned_ip=ip).one().hostname
+
+@patch('routes.trigger_hooks')
+def test_ping_client_without_hostname(mock_trigger_hooks, test_app):
+    """Test ping without hostname updates timestamp"""
+    from datetime import datetime
+    test_client, config, session_factory = test_app
+    add_client(session_factory, "test_key", "fd00::100")
+
+    response = ping(test_client, "fd00::100")
+    assert response.status_code == 200
+    assert response.json() == {'status': 'ok'}
+
+    with session_factory() as session:
+        updated = session.query(DBClient).filter_by(assigned_ip="fd00::100").one()
+        assert updated.timestamp > datetime(2020, 1, 1)
+        assert updated.hostname is None
+    mock_trigger_hooks.assert_not_called()
+
+@patch('routes.trigger_hooks')
+def test_ping_with_hostname(mock_trigger_hooks, test_app):
+    """Test ping with hostname assignment"""
+    from hook_manager import EventType
+    test_client, config, session_factory = test_app
+    add_client(session_factory, "test_key", "fd00::100")
+
+    assert ping(test_client, "fd00::100", 'testhost').status_code == 200
+    assert hostname_of(session_factory, "fd00::100") == 'testhost'
+
+    mock_trigger_hooks.assert_called_once()
+    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_HOSTNAME_CHANGED
+
+def test_ping_from_outside_fleet_subnet(test_app):
+    """Test pings from outside the fleet subnet are rejected"""
+    test_client, config, session_factory = test_app
+    assert ping(test_client, "fd01::100").status_code == 403
+    assert ping(test_client, "1.2.3.4").status_code == 403
+
+def test_ping_unregistered_client(test_app):
+    """Test pings from an unknown address in the subnet return 404"""
+    test_client, config, session_factory = test_app
+    assert ping(test_client, "fd00::999").status_code == 404
+
+def test_ping_nonexistent_fleet(test_app):
+    """Test pings to an unknown fleet return 404"""
+    test_client, config, session_factory = test_app
+    assert ping(test_client, "fd00::100", fleet='nope').status_code == 404
+
+@patch('routes.trigger_hooks')
+def test_ping_hostname_deduplication(mock_trigger_hooks, test_app):
+    """Test duplicate hostname gets numbered"""
+    from hook_manager import EventType
+    test_client, config, session_factory = test_app
+    add_client(session_factory, "key1", "fd00::100", hostname="myhost")
+    add_client(session_factory, "key2", "fd00::101")
+
+    assert ping(test_client, "fd00::101", 'myhost').status_code == 200
+    assert hostname_of(session_factory, "fd00::101") == 'myhost--2'
+
+    mock_trigger_hooks.assert_called_once()
+    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_HOSTNAME_CHANGED
+
+@patch('routes.trigger_hooks')
+def test_ping_deduplicated_hostname_is_stable(mock_trigger_hooks, test_app):
+    """Test repeated pings keep a deduplicated hostname instead of renaming it"""
+    test_client, config, session_factory = test_app
+    add_client(session_factory, "key1", "fd00::100", hostname="myhost")
+    add_client(session_factory, "key2", "fd00::101")
+
+    for _ in range(3):
+        assert ping(test_client, "fd00::101", 'myhost').status_code == 200
+        assert hostname_of(session_factory, "fd00::101") == 'myhost--2'
+
+    # Only the first ping changed the hostname
+    mock_trigger_hooks.assert_called_once()
+
 @patch('routes.trigger_hooks')
 def test_ping_reclaims_plain_hostname_once_free(mock_trigger_hooks, test_app):
     """Test a deduplicated client takes the plain hostname after its holder is gone"""
-    from datetime import datetime, UTC
-    import asyncio
-    from routes import ping_client, PingRequest
     test_client, config, session_factory = test_app
-
     # Stale record of a re-registered machine still holds "myhost"
-    with session_factory() as session:
-        session.add_all([
-            DBClient(fleet_id="testfleet", public_key="old", assigned_ip="fd00::100",
-                     http_request_ip="1.2.3.4", hostname="myhost", timestamp=datetime.now(UTC)),
-            DBClient(fleet_id="testfleet", public_key="new", assigned_ip="fd00::101",
-                     http_request_ip="1.2.3.4", hostname="myhost--2", timestamp=datetime.now(UTC)),
-        ])
-        session.commit()
-
-    mock_request = MagicMock()
-    mock_request.client.host = "fd00::101"
-
-    def ping():
-        with session_factory() as db:
-            asyncio.run(ping_client(
-                fleet_name="testfleet",
-                ping_req=PingRequest(hostname='myhost'),
-                request=mock_request,
-                db=db
-            ))
-        with session_factory() as session:
-            return session.query(DBClient).filter_by(public_key="new").one().hostname
+    add_client(session_factory, "old", "fd00::100", hostname="myhost")
+    add_client(session_factory, "new", "fd00::101", hostname="myhost--2")
 
     # While the stale record exists, keep the deduplicated name
-    assert ping() == 'myhost--2'
+    ping(test_client, "fd00::101", 'myhost')
+    assert hostname_of(session_factory, "fd00::101") == 'myhost--2'
     mock_trigger_hooks.assert_not_called()
 
     # Stale record pruned: take over the plain name, once
     with session_factory() as session:
         session.query(DBClient).filter_by(public_key="old").delete()
         session.commit()
-    assert ping() == 'myhost'
-    assert ping() == 'myhost'
+    for _ in range(2):
+        ping(test_client, "fd00::101", 'myhost')
+        assert hostname_of(session_factory, "fd00::101") == 'myhost'
     mock_trigger_hooks.assert_called_once()
+
+@pytest.mark.parametrize('hostname', ['bad\n', 'UPPER', 'has.dot', 'a' * 64])
+def test_ping_rejects_invalid_hostname(hostname, test_app):
+    """Test hostnames with invalid characters or length are rejected"""
+    test_client, config, session_factory = test_app
+    add_client(session_factory, "key1", "fd00::100")
+
+    assert ping(test_client, "fd00::100", hostname).status_code == 400
+    assert hostname_of(session_factory, "fd00::100") is None
