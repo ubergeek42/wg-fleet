@@ -66,10 +66,8 @@ def test_register_client(mock_allocate_ip, mock_wg, mock_trigger_hooks, test_app
         assert db_client.public_key == 'client_pub'
         assert db_client.assigned_ip == 'fd00::1234'
 
-    # Verify hooks triggered
-    from hook_manager import EventType
-    mock_trigger_hooks.assert_called_once()
-    assert mock_trigger_hooks.call_args[0][0].event_type == EventType.CLIENT_ADDED
+    # New clients have no hostname yet, so nothing the hooks export changes
+    mock_trigger_hooks.assert_not_called()
 
 def test_register_nonexistent_fleet(test_app):
     """Test registration with invalid fleet returns 404"""

@@ -378,7 +378,7 @@ from . import my_hook
 ### Available Events
 
 - `EventType.STARTUP`: Application startup
-- `EventType.CLIENT_ADDED`: New client registered
+- `EventType.CLIENT_ADDED`: New client registered (currently not fired: a new client has no hostname yet, so the existing hooks' output wouldn't change)
 - `EventType.CLIENT_HOSTNAME_CHANGED`: Client hostname updated
 - `EventType.CLIENT_REMOVED`: Client pruned or removed
 

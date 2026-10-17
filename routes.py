@@ -118,16 +118,6 @@ async def register_client(
 
         logger.info(f"Client registered: fleet={fleet_name}, ip={client_ip}, source={request.client.host}")
 
-        trigger_hooks(HookContext(
-            event_type=EventType.CLIENT_ADDED,
-            config=app_config,
-            session_factory=_session_factory,
-            client_data={
-                'ip': client_ip,
-                'fleet_id': fleet_name
-            }
-        ))
-
         return RegisterResponse(
             status="success",
             config=config_text,
