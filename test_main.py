@@ -43,7 +43,7 @@ def test_setup_fleet_interface_new(mock_path, mock_wg, test_db):
 
     # Verify config created
     mock_wg.create_interface_config.assert_called_once_with(
-        'testfleet', fleet_config, 'priv_key'
+        'testfleet', fleet_config, 'priv_key', str(mock_path.return_value)
     )
 
     # Verify interface brought up
@@ -160,3 +160,31 @@ def test_remove_unconfigured_fleet_clients(test_db):
 
     with session_factory() as session:
         assert [c.fleet_id for c in session.query(Client).all()] == ['kept']
+
+def _fleet_config(port):
+    fleet_config = MagicMock()
+    fleet_config.ip6 = 'fd00::1'
+    fleet_config.subnet = 'fd00::/64'
+    fleet_config.port = port
+    return fleet_config
+
+@pytest.mark.parametrize('port, expect_restart', [(51820, False), (51830, True)])
+def test_setup_fleet_interface_existing_config(port, expect_restart, tmp_path):
+    """Test an existing config is kept as-is, or rewritten and restarted when the fleet config changed"""
+    import wireguard
+    config_path = tmp_path / 'wg_testfleet.conf'
+    wireguard.create_interface_config('testfleet', _fleet_config(51820), 'c2VydmVyX2tleQ==', str(config_path))
+
+    with patch('main.Path', return_value=config_path), \
+         patch('main.wireguard.generate_keypair') as mock_genkey, \
+         patch('main.wireguard.interface_exists', return_value=True), \
+         patch('main.wireguard.bring_down_interface') as mock_down, \
+         patch('main.wireguard.bring_up_interface') as mock_up:
+        setup_fleet_interface('testfleet', _fleet_config(port))
+
+    mock_genkey.assert_not_called()
+    content = config_path.read_text()
+    assert 'PrivateKey = c2VydmVyX2tleQ==' in content
+    assert f'ListenPort = {port}' in content
+    assert mock_down.called == expect_restart
+    mock_up.assert_called_once_with('testfleet')

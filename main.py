@@ -43,9 +43,20 @@ def setup_fleet_interface(fleet_name: str, fleet_config):
         private_key, public_key = wireguard.generate_keypair()
 
         # Create config file
-        wireguard.create_interface_config(fleet_name, fleet_config, private_key)
+        wireguard.create_interface_config(fleet_name, fleet_config, private_key, str(config_path))
     else:
-        logger.info(f"Using existing interface config for fleet: {fleet_name}")
+        # Keep the server key, but apply address/port changes from the fleet config
+        private_key = wireguard.read_private_key(str(config_path))
+        if config_path.read_text() != wireguard.render_interface_config(fleet_config, private_key):
+            logger.warning(
+                f"Config for fleet {fleet_name} changed; rewriting wg_{fleet_name}.conf and restarting "
+                f"the interface. Existing clients will need to re-register."
+            )
+            wireguard.create_interface_config(fleet_name, fleet_config, private_key, str(config_path))
+            if wireguard.interface_exists(fleet_name):
+                wireguard.bring_down_interface(fleet_name)
+        else:
+            logger.info(f"Using existing interface config for fleet: {fleet_name}")
 
     # Bring up interface
     try:

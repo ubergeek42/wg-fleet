@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 import logging
 import ipaddress
 import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,47 @@ def generate_keypair() -> Tuple[str, str]:
     private_key = run_command(['wg', 'genkey'])
     public_key = run_command(['wg', 'pubkey'], input_data=private_key)
     return (private_key, public_key)
+
+def render_interface_config(fleet_config, private_key: str) -> str:
+    """
+    Build WireGuard interface configuration text for the server.
+
+    Args:
+        fleet_config: Fleet configuration with ip6, subnet, port
+        private_key: Server's private key
+
+    Returns:
+        Interface config as string
+    """
+    # Extract prefix length from subnet
+    network = ipaddress.IPv6Network(fleet_config.subnet, strict=False)
+    prefix_len = network.prefixlen
+
+    return f"""[Interface]
+Address = {fleet_config.ip6}/{prefix_len}
+ListenPort = {fleet_config.port}
+PrivateKey = {private_key}
+"""
+
+def read_private_key(config_path: str) -> str:
+    """
+    Read the server's private key from an existing interface config file.
+
+    Args:
+        config_path: Path to the interface config
+
+    Returns:
+        Private key string
+
+    Raises:
+        ValueError: If the file has no PrivateKey line
+    """
+    for line in Path(config_path).read_text().splitlines():
+        key, sep, value = line.partition('=')
+        if sep and key.strip() == 'PrivateKey':
+            # Keys are base64 and may end in '=', so take everything after the first '='
+            return value.strip()
+    raise ValueError(f"No PrivateKey in {config_path}")
 
 def create_interface_config(
     fleet_name: str,
@@ -36,15 +78,7 @@ def create_interface_config(
     if config_path is None:
         config_path = f'/etc/wireguard/wg_{fleet_name}.conf'
 
-    # Extract prefix length from subnet
-    network = ipaddress.IPv6Network(fleet_config.subnet, strict=False)
-    prefix_len = network.prefixlen
-
-    config_content = f"""[Interface]
-Address = {fleet_config.ip6}/{prefix_len}
-ListenPort = {fleet_config.port}
-PrivateKey = {private_key}
-"""
+    config_content = render_interface_config(fleet_config, private_key)
 
     # Create with restrictive permissions up front so the private key is never world-readable
     fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
