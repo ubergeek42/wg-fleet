@@ -288,3 +288,30 @@ fleets:
             load_config(config_path)
     finally:
         Path(config_path).unlink()
+
+@pytest.mark.parametrize('ip6, subnet, error', [
+    ('fd00::1', 'fd00::1/64', 'invalid IPv6 subnet'),     # host bits set
+    ('fd00::1', 'fd00::/120', 'must be /64 or larger'),   # too small for random allocation
+    ('fd01::1', 'fd00::/64', 'not in subnet'),            # server address outside subnet
+])
+def test_invalid_subnet_layout(ip6, subnet, error):
+    """Test subnets that would break allocation or ping checks are rejected"""
+    config_content = f"""
+domain: test.internal
+prune_timeout: 30m
+fleets:
+  testfleet:
+    ip6: "{ip6}"
+    subnet: "{subnet}"
+    external_ip: "1.2.3.4"
+    port: 51820
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_content)
+        config_path = f.name
+
+    try:
+        with pytest.raises(ValueError, match=error):
+            load_config(config_path)
+    finally:
+        Path(config_path).unlink()

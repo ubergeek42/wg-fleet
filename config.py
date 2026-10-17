@@ -107,14 +107,18 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
         except (ipaddress.AddressValueError, ValueError) as e:
             raise ValueError(f"Fleet '{name}': invalid IPv6 address '{fleet_data['ip6']}': {e}")
 
-        # Validate IPv6 subnet
+        # Validate IPv6 subnet (strict: no host bits set, e.g. fd00::/64 not fd00::1/64)
         try:
-            network = ipaddress.IPv6Network(fleet_data['subnet'], strict=False)
-            # Ensure it's actually IPv6
-            if network.version != 6:
-                raise ValueError(f"Fleet '{name}': subnet must be IPv6")
+            network = ipaddress.IPv6Network(fleet_data['subnet'])
         except (ipaddress.AddressValueError, ValueError) as e:
             raise ValueError(f"Fleet '{name}': invalid IPv6 subnet '{fleet_data['subnet']}': {e}")
+
+        # Client addresses are picked at random without collision checks, so the subnet must be large
+        if network.prefixlen > 64:
+            raise ValueError(f"Fleet '{name}': subnet must be /64 or larger, got /{network.prefixlen}")
+
+        if ipaddress.IPv6Address(fleet_data['ip6']) not in network:
+            raise ValueError(f"Fleet '{name}': ip6 {fleet_data['ip6']} is not in subnet {network}")
 
         fleets[name] = FleetConfig(
             ip6=fleet_data['ip6'],
