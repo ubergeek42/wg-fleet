@@ -213,7 +213,8 @@ async def ping_client(
     hostname_changed = False
     if ping_req.hostname:
         # Validate hostname format
-        if not re.match(r'^[a-z0-9_-]+$', ping_req.hostname):
+        # fullmatch, not match with $, which would accept a trailing newline
+        if not re.fullmatch(r'[a-z0-9_-]{1,63}', ping_req.hostname):
             raise HTTPException(status_code=400, detail="Invalid hostname format")
 
         # Check if different from current (a deduplicated "name--N" still counts as the same name)

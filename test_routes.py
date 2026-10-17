@@ -249,3 +249,30 @@ def test_ping_deduplicated_hostname_is_stable(mock_trigger_hooks, test_app):
 
     # Only the first ping changed the hostname
     mock_trigger_hooks.assert_called_once()
+
+@pytest.mark.parametrize('hostname', ['bad\n', 'UPPER', 'has.dot', 'a' * 64])
+def test_ping_rejects_invalid_hostname(hostname, test_app):
+    """Test hostnames with invalid characters or length are rejected"""
+    from datetime import datetime, UTC
+    import asyncio
+    from fastapi import HTTPException
+    from routes import ping_client, PingRequest
+    test_client, config, session_factory = test_app
+
+    with session_factory() as session:
+        session.add(DBClient(fleet_id="testfleet", public_key="key1", assigned_ip="fd00::100",
+                             http_request_ip="1.2.3.4", hostname=None, timestamp=datetime.now(UTC)))
+        session.commit()
+
+    mock_request = MagicMock()
+    mock_request.client.host = "fd00::100"
+
+    with session_factory() as db:
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(ping_client(
+                fleet_name="testfleet",
+                ping_req=PingRequest(hostname=hostname),
+                request=mock_request,
+                db=db
+            ))
+    assert exc_info.value.status_code == 400
