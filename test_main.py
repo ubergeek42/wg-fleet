@@ -138,3 +138,25 @@ def test_main_exits_on_startup_failure(tmp_path):
 
     assert exc_info.value.code == 1
     mock_uvicorn.run.assert_not_called()
+
+def test_remove_unconfigured_fleet_clients(test_db):
+    """Test clients of fleets removed from the config are deleted"""
+    from main import remove_unconfigured_fleet_clients
+    session_factory, engine, db_path = test_db
+
+    with session_factory() as session:
+        session.add_all([
+            Client(fleet_id="kept", public_key="k1", assigned_ip="fd00::1",
+                   http_request_ip="1.2.3.4", timestamp=datetime.now(UTC)),
+            Client(fleet_id="dropped", public_key="k2", assigned_ip="fd01::1",
+                   http_request_ip="1.2.3.4", timestamp=datetime.now(UTC)),
+        ])
+        session.commit()
+
+    config = MagicMock()
+    config.fleets = {'kept': MagicMock()}
+
+    remove_unconfigured_fleet_clients(config, session_factory)
+
+    with session_factory() as session:
+        assert [c.fleet_id for c in session.query(Client).all()] == ['kept']

@@ -89,6 +89,24 @@ def reconcile_fleet_state(fleet_name: str, session_factory):
 
         session.commit()
 
+def remove_unconfigured_fleet_clients(config, session_factory):
+    """
+    Remove database clients of fleets that are no longer in the config.
+
+    Pruning and reconciliation only look at configured fleets, so these would
+    otherwise stay in the generated hosts/Prometheus/Ansible files forever.
+
+    Args:
+        config: Application configuration
+        session_factory: SQLAlchemy session factory
+    """
+    with session_factory() as session:
+        stale = session.query(Client).filter(Client.fleet_id.notin_(list(config.fleets))).all()
+        for client in stale:
+            logger.info(f"Removing client of unconfigured fleet {client.fleet_id}: {client.assigned_ip}")
+            session.delete(client)
+        session.commit()
+
 def initialize_fleets(config, session_factory):
     """
     Bring up WireGuard interfaces, reconcile state, and run startup hooks.
@@ -97,6 +115,8 @@ def initialize_fleets(config, session_factory):
         config: Application configuration
         session_factory: SQLAlchemy session factory
     """
+    remove_unconfigured_fleet_clients(config, session_factory)
+
     for fleet_name, fleet_config in config.fleets.items():
         setup_fleet_interface(fleet_name, fleet_config)
         reconcile_fleet_state(fleet_name, session_factory)
