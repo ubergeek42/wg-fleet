@@ -61,7 +61,10 @@ def test_db_with_clients():
 @pytest.fixture
 def app_config():
     """Create a mock app config object"""
-    return type('Config', (), {'domain': 'test.internal'})()
+    return type('Config', (), {
+        'domain': 'test.internal',
+        'fleets': {'testfleet': None, 'otherfleet': None, 'emptyfleet': None},
+    })()
 
 
 def test_hosts_file_hook_generates_entries(test_db_with_clients, app_config, tmp_path):
@@ -254,6 +257,9 @@ def test_ansible_inventory_hook_generates_yaml_inventory(test_db_with_clients, a
         otherfleet = children['otherfleet']
         assert 'hosts' in otherfleet
         assert len(otherfleet['hosts']) == 0
+
+        # Configured fleet with no clients at all is still a group
+        assert children['emptyfleet'] == {'hosts': {}}
 
     finally:
         hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = original_path

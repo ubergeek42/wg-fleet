@@ -34,13 +34,11 @@ def ansible_inventory_hook(context: HookContext):
         # Group clients by fleet
         fleets = defaultdict(list)
 
-        with context.session_factory() as session:
-            # Query all distinct fleet_ids to ensure all fleets are represented
-            all_fleet_ids = session.query(Client.fleet_id).distinct().all()
-            for (fleet_id,) in all_fleet_ids:
-                if fleet_id not in fleets:
-                    fleets[fleet_id] = []
+        # Include every configured fleet, even ones with no clients yet
+        for fleet_name in context.config.fleets:
+            fleets[fleet_name] = []
 
+        with context.session_factory() as session:
             # Query all clients with hostnames
             clients = session.query(Client).filter(
                 Client.hostname.isnot(None)
