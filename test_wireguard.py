@@ -88,3 +88,23 @@ def test_list_peers(mock_run_command):
     assert peers[0]['endpoint'] == '192.168.1.100:51820'
     assert peers[0]['rx_bytes'] == 1024
     assert peers[0]['tx_bytes'] == 2048
+
+@pytest.mark.parametrize('endpoint_ip, expected', [
+    ('1.2.3.4', 'Endpoint = 1.2.3.4:51820'),
+    ('2001:db8::1', 'Endpoint = [2001:db8::1]:51820'),
+])
+def test_build_client_config_endpoint(endpoint_ip, expected):
+    """Test client config endpoint formatting for IPv4 and IPv6 server addresses"""
+    from wireguard import build_client_config
+    config = build_client_config(
+        client_private_key='client_priv',
+        client_ip='fd00::1234',
+        server_public_key='server_pub',
+        endpoint_ip=endpoint_ip,
+        endpoint_port=51820,
+        server_ip='fd00::1',
+        subnet='fd00::/64'
+    )
+    assert expected in config
+    assert 'Address = fd00::1234/64' in config
+    assert 'AllowedIPs = fd00::1/128' in config

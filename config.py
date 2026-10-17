@@ -107,6 +107,12 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
         except (ipaddress.AddressValueError, ValueError) as e:
             raise ValueError(f"Fleet '{name}': invalid IPv6 address '{fleet_data['ip6']}': {e}")
 
+        # Validate external IP (clients connect to it; IPv4 or IPv6)
+        try:
+            ipaddress.ip_address(fleet_data['external_ip'])
+        except ValueError as e:
+            raise ValueError(f"Fleet '{name}': invalid external_ip '{fleet_data['external_ip']}': {e}")
+
         # Validate IPv6 subnet (strict: no host bits set, e.g. fd00::/64 not fd00::1/64)
         try:
             network = ipaddress.IPv6Network(fleet_data['subnet'])

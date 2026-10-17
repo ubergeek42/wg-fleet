@@ -88,7 +88,7 @@ fleets:
   Linux limits to 15 characters)
   - `ip6`: Server's IPv6 address for this fleet
   - `subnet`: IPv6 subnet for client allocation (CIDR notation)
-  - `external_ip`: Public IP address clients connect to
+  - `external_ip`: Public IP address (IPv4 or IPv6) clients connect to
   - `port`: UDP port for this WireGuard interface
 
 ### Duration Format

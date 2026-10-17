@@ -315,3 +315,25 @@ fleets:
             load_config(config_path)
     finally:
         Path(config_path).unlink()
+
+def test_invalid_external_ip():
+    """Test a non-IP external_ip is rejected"""
+    config_content = """
+domain: test.internal
+prune_timeout: 30m
+fleets:
+  testfleet:
+    ip6: "fd00::1"
+    subnet: "fd00::/64"
+    external_ip: "not-an-ip"
+    port: 51820
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_content)
+        config_path = f.name
+
+    try:
+        with pytest.raises(ValueError, match="invalid external_ip"):
+            load_config(config_path)
+    finally:
+        Path(config_path).unlink()

@@ -236,6 +236,10 @@ def build_client_config(
     network = ipaddress.IPv6Network(subnet, strict=False)
     prefix_len = network.prefixlen
 
+    # IPv6 endpoints need brackets so the port isn't read as part of the address
+    if ipaddress.ip_address(endpoint_ip).version == 6:
+        endpoint_ip = f"[{endpoint_ip}]"
+
     return f"""[Interface]
 PrivateKey = {client_private_key}
 Address = {client_ip}/{prefix_len}
