@@ -26,11 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global state
-app_config = None
-session_factory = None
-engine = None
-
 def setup_fleet_interface(fleet_name: str, fleet_config):
     """
     Setup WireGuard interface for a fleet.
@@ -94,76 +89,65 @@ def reconcile_fleet_state(fleet_name: str, session_factory):
 
         session.commit()
 
-async def startup():
-    """Application startup logic"""
-    global app_config, session_factory, engine
+def initialize_fleets(config, session_factory):
+    """
+    Bring up WireGuard interfaces, reconcile state, and run startup hooks.
 
-    try:
-        logger.info("Starting wg-fleet server")
+    Args:
+        config: Application configuration
+        session_factory: SQLAlchemy session factory
+    """
+    for fleet_name, fleet_config in config.fleets.items():
+        setup_fleet_interface(fleet_name, fleet_config)
+        reconcile_fleet_state(fleet_name, session_factory)
 
-        # Parse CLI arguments
-        parser = argparse.ArgumentParser(description='WireGuard Fleet Manager')
-        parser.add_argument('--config', default='/etc/wg-fleet.yaml',
-                          help='Path to configuration file')
-        args = parser.parse_args()
+    # Generate initial hosts file etc. via hook system
+    trigger_hooks(EventType.STARTUP, HookContext(
+        event_type=EventType.STARTUP,
+        config=config,
+        session_factory=session_factory
+    ))
 
-        # Load config
-        logger.info(f"Loading configuration from: {args.config}")
-        app_config = load_config(args.config)
+def make_lifespan(config, session_factory):
+    """
+    Build the app lifespan, which runs the background pruning task.
 
-        # Initialize database
-        engine = init_db()
-        session_factory = get_session_factory(engine)
-
-        # Setup WireGuard interfaces for each fleet
-        for fleet_name, fleet_config in app_config.fleets.items():
-            setup_fleet_interface(fleet_name, fleet_config)
-            reconcile_fleet_state(fleet_name, session_factory)
-
-        # Generate initial hosts file via hook system
-        trigger_hooks(EventType.STARTUP, HookContext(
-            event_type=EventType.STARTUP,
-            config=app_config,
-            session_factory=session_factory
-        ))
-
-        # Start background pruning task
-        asyncio.create_task(prune_stale_clients(app_config, session_factory))
-
+    Args:
+        config: Application configuration
+        session_factory: SQLAlchemy session factory
+    """
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        prune_task = asyncio.create_task(prune_stale_clients(config, session_factory))
         logger.info("Server started successfully")
+        yield
+        logger.info("Shutting down wg-fleet server")
+        prune_task.cancel()
 
-    except Exception as e:
-        logger.error(f"Startup failed: {e}", exc_info=True)
-        sys.exit(1)
-
-async def shutdown():
-    """Application shutdown logic"""
-    logger.info("Shutting down wg-fleet server")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Run startup/shutdown logic around the application's lifetime"""
-    await startup()
-    yield
-    await shutdown()
+    return lifespan
 
 def main():
     """Main entry point"""
-    # Create FastAPI app
-    from config import load_config
-    from database import init_db, get_session_factory
-
-    # Load config for app creation
     parser = argparse.ArgumentParser(description='WireGuard Fleet Manager')
     parser.add_argument('--config', default='/etc/wg-fleet.yaml',
                       help='Path to configuration file')
     args = parser.parse_args()
 
-    config = load_config(args.config)
-    engine = init_db()
-    session_factory = get_session_factory(engine)
+    try:
+        logger.info("Starting wg-fleet server")
+        logger.info(f"Loading configuration from: {args.config}")
+        config = load_config(args.config)
 
-    app = create_app(config, session_factory, engine, lifespan=lifespan)
+        engine = init_db()
+        session_factory = get_session_factory(engine)
+
+        initialize_fleets(config, session_factory)
+    except Exception as e:
+        logger.error(f"Startup failed: {e}", exc_info=True)
+        sys.exit(1)
+
+    app = create_app(config, session_factory, engine,
+                     lifespan=make_lifespan(config, session_factory))
 
     # Run server on all interfaces (IPv4 and IPv6)
     # proxy_headers=True enables trusting X-Forwarded-* headers from reverse proxies

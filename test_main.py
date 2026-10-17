@@ -92,8 +92,8 @@ def test_reconcile_fleet_state(mock_wg, test_db):
     # Verify extra peer removed from WireGuard
     mock_wg.remove_peer.assert_called_once_with('testfleet', 'extra_key')
 
-def test_main_runs_startup_and_shutdown(test_db, tmp_path):
-    """Test main() builds an app whose lifespan runs startup and shutdown"""
+def test_main_initializes_once_and_runs_pruning(test_db, tmp_path):
+    """Test main() initializes fleets once and the app lifespan runs the pruner"""
     from unittest.mock import AsyncMock
     from fastapi.testclient import TestClient
     import main
@@ -112,14 +112,29 @@ fleets:
 """)
 
     with patch('sys.argv', ['main.py', '--config', str(config_path)]), \
-         patch('database.init_db', return_value=engine), \
+         patch('main.init_db', return_value=engine) as mock_init_db, \
          patch('main.uvicorn') as mock_uvicorn, \
-         patch('main.startup', new_callable=AsyncMock) as mock_startup, \
-         patch('main.shutdown', new_callable=AsyncMock) as mock_shutdown:
+         patch('main.initialize_fleets') as mock_initialize, \
+         patch('main.prune_stale_clients', new_callable=AsyncMock) as mock_prune:
         main.main()
+
+        mock_init_db.assert_called_once()
+        mock_initialize.assert_called_once()
 
         app = mock_uvicorn.run.call_args[0][0]
         with TestClient(app) as client:
-            mock_startup.assert_awaited_once()
             assert client.get('/').status_code == 200
-        mock_shutdown.assert_awaited_once()
+        mock_prune.assert_awaited_once()
+        assert mock_prune.call_args[0][1] is mock_initialize.call_args[0][1]
+
+def test_main_exits_on_startup_failure(tmp_path):
+    """Test main() exits non-zero when startup fails"""
+    import main
+
+    with patch('sys.argv', ['main.py', '--config', str(tmp_path / 'missing.yaml')]), \
+         patch('main.uvicorn') as mock_uvicorn:
+        with pytest.raises(SystemExit) as exc_info:
+            main.main()
+
+    assert exc_info.value.code == 1
+    mock_uvicorn.run.assert_not_called()
