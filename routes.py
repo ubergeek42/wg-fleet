@@ -162,14 +162,18 @@ def get_unique_hostname(session: Session, fleet_id: str, requested: str) -> str:
     counter = 2
     current = base_hostname
 
-    while session.query(Client).filter_by(
-        fleet_id=fleet_id,
-        hostname=current
-    ).first() is not None:
+    while hostname_in_use(session, fleet_id, current):
         current = f"{base_hostname}--{counter}"
         counter += 1
 
     return current
+
+def hostname_in_use(session: Session, fleet_id: str, hostname: str) -> bool:
+    """Check whether any client in the fleet has this hostname"""
+    return session.query(Client).filter_by(
+        fleet_id=fleet_id,
+        hostname=hostname
+    ).first() is not None
 
 def hostname_matches_request(current: Optional[str], requested: str) -> bool:
     """
@@ -237,10 +241,17 @@ async def ping_client(
         if not re.fullmatch(r'[a-z0-9_-]{1,63}', ping_req.hostname):
             raise HTTPException(status_code=400, detail="Invalid hostname format")
 
-        # Check if different from current (a deduplicated "name--N" still counts as the same name)
+        unique_hostname = None
         if not hostname_matches_request(client_record.hostname, ping_req.hostname):
             # Get unique hostname (handles deduplication)
             unique_hostname = get_unique_hostname(db, fleet_name, ping_req.hostname)
+        elif (client_record.hostname != ping_req.hostname
+              and not hostname_in_use(db, fleet_name, ping_req.hostname)):
+            # Deduplicated "name--N" keeps its name across pings, but takes the plain
+            # name once it's free (e.g. the stale record of a re-registered machine was pruned)
+            unique_hostname = ping_req.hostname
+
+        if unique_hostname:
             client_record.hostname = unique_hostname
             hostname_changed = True
             logger.info(f"Hostname updated: fleet={fleet_name}, ip={client_ip}, hostname={unique_hostname}")

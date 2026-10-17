@@ -302,3 +302,47 @@ def test_register_removes_peer_when_db_save_fails(mock_allocate_ip, mock_wg, tes
     mock_wg.remove_peer.assert_called_once_with('testfleet', 'client_pub')
     with session_factory() as session:
         assert session.query(DBClient).count() == 0
+
+@patch('routes.trigger_hooks')
+def test_ping_reclaims_plain_hostname_once_free(mock_trigger_hooks, test_app):
+    """Test a deduplicated client takes the plain hostname after its holder is gone"""
+    from datetime import datetime, UTC
+    import asyncio
+    from routes import ping_client, PingRequest
+    test_client, config, session_factory = test_app
+
+    # Stale record of a re-registered machine still holds "myhost"
+    with session_factory() as session:
+        session.add_all([
+            DBClient(fleet_id="testfleet", public_key="old", assigned_ip="fd00::100",
+                     http_request_ip="1.2.3.4", hostname="myhost", timestamp=datetime.now(UTC)),
+            DBClient(fleet_id="testfleet", public_key="new", assigned_ip="fd00::101",
+                     http_request_ip="1.2.3.4", hostname="myhost--2", timestamp=datetime.now(UTC)),
+        ])
+        session.commit()
+
+    mock_request = MagicMock()
+    mock_request.client.host = "fd00::101"
+
+    def ping():
+        with session_factory() as db:
+            asyncio.run(ping_client(
+                fleet_name="testfleet",
+                ping_req=PingRequest(hostname='myhost'),
+                request=mock_request,
+                db=db
+            ))
+        with session_factory() as session:
+            return session.query(DBClient).filter_by(public_key="new").one().hostname
+
+    # While the stale record exists, keep the deduplicated name
+    assert ping() == 'myhost--2'
+    mock_trigger_hooks.assert_not_called()
+
+    # Stale record pruned: take over the plain name, once
+    with session_factory() as session:
+        session.query(DBClient).filter_by(public_key="old").delete()
+        session.commit()
+    assert ping() == 'myhost'
+    assert ping() == 'myhost'
+    mock_trigger_hooks.assert_called_once()
