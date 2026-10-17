@@ -35,7 +35,7 @@ def run_command(
                 if pattern in arg:
                     log_args[i] = "[REDACTED]"
 
-    logger.info(f"Running command: {' '.join(log_args)}")
+    logger.debug(f"Running command: {' '.join(log_args)}")
 
     try:
         result = subprocess.run(

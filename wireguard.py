@@ -108,7 +108,7 @@ def add_peer(fleet_name: str, public_key: str, allowed_ip: str) -> None:
         'peer', public_key,
         'allowed-ips', allowed_ip
     ])
-    logger.debug(f"Added peer to wg_{fleet_name}: {allowed_ip}")
+    logger.info(f"Added peer to wg_{fleet_name}: {allowed_ip}")
 
 def remove_peer(fleet_name: str, public_key: str) -> None:
     """
@@ -123,7 +123,7 @@ def remove_peer(fleet_name: str, public_key: str) -> None:
         'peer', public_key,
         'remove'
     ])
-    logger.debug(f"Removed peer from wg_{fleet_name}")
+    logger.info(f"Removed peer from wg_{fleet_name}")
 
 def list_peers(fleet_name: str) -> List[Dict]:
     """
