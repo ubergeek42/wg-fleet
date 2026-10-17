@@ -534,7 +534,7 @@ The ping endpoint validates that requests originate from within the fleet's IPv6
 
 ### Sensitive Data
 
-Private keys are never logged. The `command.py` module redacts sensitive patterns from log output.
+Private keys are never logged: they are passed to `wg` on stdin, and only command arguments are logged (at DEBUG level). Keep secrets out of command arguments.
 
 ### Database Permissions
 

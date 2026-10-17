@@ -10,7 +10,6 @@ class CommandError(Exception):
 
 def run_command(
     args: List[str],
-    sensitive_patterns: Optional[List[str]] = None,
     input_data: Optional[str] = None
 ) -> str:
     """
@@ -18,8 +17,7 @@ def run_command(
 
     Args:
         args: Command and arguments as list
-        sensitive_patterns: Strings to redact in logs (e.g., private keys)
-        input_data: Optional stdin data
+        input_data: Optional stdin data (not logged; use this for secrets such as private keys)
 
     Returns:
         stdout as string
@@ -27,15 +25,7 @@ def run_command(
     Raises:
         CommandError: On non-zero exit code
     """
-    # Create sanitized version for logging
-    log_args = args.copy()
-    if sensitive_patterns:
-        for i, arg in enumerate(log_args):
-            for pattern in sensitive_patterns:
-                if pattern in arg:
-                    log_args[i] = "[REDACTED]"
-
-    logger.debug(f"Running command: {' '.join(log_args)}")
+    logger.debug(f"Running command: {' '.join(args)}")
 
     try:
         result = subprocess.run(
@@ -47,7 +37,7 @@ def run_command(
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        logger.error(f"Command failed: {' '.join(log_args)}")
+        logger.error(f"Command failed: {' '.join(args)}")
         logger.error(f"Exit code: {e.returncode}")
         logger.error(f"Stderr: {e.stderr}")
         raise CommandError(f"Command failed: {e.stderr}") from e
