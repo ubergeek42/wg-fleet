@@ -34,17 +34,12 @@ def parse_duration(duration_str: str) -> timedelta:
     Raises:
         ValueError: If format is invalid
     """
-    total_minutes = 0
+    match = re.fullmatch(r'(?:(\d+)h)?(?:(\d+)m)?', str(duration_str).strip())
+    if not match:
+        raise ValueError(f"Invalid duration format: {duration_str}")
 
-    # Match hours
-    hour_match = re.search(r'(\d+)h', duration_str)
-    if hour_match:
-        total_minutes += int(hour_match.group(1)) * 60
-
-    # Match minutes
-    min_match = re.search(r'(\d+)m', duration_str)
-    if min_match:
-        total_minutes += int(min_match.group(1))
+    hours, minutes = match.groups()
+    total_minutes = int(hours or 0) * 60 + int(minutes or 0)
 
     if total_minutes == 0:
         raise ValueError(f"Invalid duration format: {duration_str}")
@@ -77,6 +72,10 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
         raise ValueError("Missing 'domain' in config")
     if 'prune_timeout' not in data:
         raise ValueError("Missing 'prune_timeout' in config")
+    try:
+        parse_duration(data['prune_timeout'])
+    except ValueError as e:
+        raise ValueError(f"Invalid 'prune_timeout': {e}")
     if 'fleets' not in data or not data['fleets']:
         raise ValueError("No fleets configured")
 

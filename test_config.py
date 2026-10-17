@@ -40,6 +40,34 @@ def test_parse_duration():
     assert parse_duration("1h") == timedelta(hours=1)
     assert parse_duration("2h30m") == timedelta(hours=2, minutes=30)
 
+@pytest.mark.parametrize('duration', ['', '0m', '30s', '1d', '90', '1h30', '30m1h', 'x30m'])
+def test_parse_duration_rejects_invalid(duration):
+    """Test malformed or unsupported durations are rejected, not partially parsed"""
+    with pytest.raises(ValueError):
+        parse_duration(duration)
+
+def test_invalid_prune_timeout_rejected_at_load():
+    """Test a bad prune_timeout fails config loading instead of later pruning"""
+    config_content = """
+domain: test.internal
+prune_timeout: 30s
+fleets:
+  testfleet:
+    ip6: "fd00::1"
+    subnet: "fd00::/64"
+    external_ip: "1.2.3.4"
+    port: 51820
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_content)
+        config_path = f.name
+
+    try:
+        with pytest.raises(ValueError, match="prune_timeout"):
+            load_config(config_path)
+    finally:
+        Path(config_path).unlink()
+
 def test_invalid_port_type():
     """Test that non-integer port raises ValueError"""
     config_content = """
