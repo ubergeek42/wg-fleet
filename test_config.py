@@ -237,3 +237,26 @@ fleets:
         assert config.fleets["testfleet"].port == 65535
     finally:
         Path(config_path).unlink()
+
+@pytest.mark.parametrize('fleet_name', ['thirteenchars', 'Upper', 'has_underscore', '../etc', '123:'])
+def test_invalid_fleet_name(fleet_name):
+    """Test fleet names that can't be used as interface names are rejected"""
+    config_content = f"""
+domain: test.internal
+prune_timeout: 30m
+fleets:
+  "{fleet_name}":
+    ip6: "fd00::1"
+    subnet: "fd00::/64"
+    external_ip: "1.2.3.4"
+    port: 51820
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_content)
+        config_path = f.name
+
+    try:
+        with pytest.raises(ValueError, match="Fleet name"):
+            load_config(config_path)
+    finally:
+        Path(config_path).unlink()

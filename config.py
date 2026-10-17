@@ -83,6 +83,13 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
     # Parse fleets
     fleets = {}
     for name, fleet_data in data['fleets'].items():
+        # Fleet name becomes the interface name wg_<name> (Linux limit: 15 chars),
+        # a config file path, and a DNS label
+        if not isinstance(name, str) or not re.fullmatch(r'[a-z0-9-]{1,12}', name):
+            raise ValueError(
+                f"Fleet name '{name}' must be 1-12 characters of lowercase letters, digits, or '-'"
+            )
+
         required_fields = ['ip6', 'subnet', 'external_ip', 'port']
         for field in required_fields:
             if field not in fleet_data:
