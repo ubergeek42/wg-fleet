@@ -3,6 +3,7 @@ import asyncio
 import logging
 import sys
 import argparse
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -139,6 +140,13 @@ async def shutdown():
     """Application shutdown logic"""
     logger.info("Shutting down wg-fleet server")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run startup/shutdown logic around the application's lifetime"""
+    await startup()
+    yield
+    await shutdown()
+
 def main():
     """Main entry point"""
     # Create FastAPI app
@@ -155,11 +163,7 @@ def main():
     engine = init_db()
     session_factory = get_session_factory(engine)
 
-    app = create_app(config, session_factory, engine)
-
-    # Register startup/shutdown
-    app.add_event_handler("startup", startup)
-    app.add_event_handler("shutdown", shutdown)
+    app = create_app(config, session_factory, engine, lifespan=lifespan)
 
     # Run server on all interfaces (IPv4 and IPv6)
     # proxy_headers=True enables trusting X-Forwarded-* headers from reverse proxies

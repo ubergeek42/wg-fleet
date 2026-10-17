@@ -285,8 +285,7 @@ templates.env.filters['humanize'] = humanize_timedelta
 @web_router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Fleet list page"""
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "fleets": app_config.fleets.keys()
     })
 
@@ -321,14 +320,13 @@ async def fleet_detail(
     except Exception as e:
         logger.warning(f"Failed to fetch WireGuard stats: {e}")
 
-    return templates.TemplateResponse("fleet.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "fleet.html", {
         "fleet_name": fleet_name,
         "fleet_config": fleet_config,
         "clients": clients
     })
 
-def create_app(config, session_factory, engine):
+def create_app(config, session_factory, engine, lifespan=None):
     """
     Create FastAPI application.
 
@@ -336,6 +334,7 @@ def create_app(config, session_factory, engine):
         config: Application configuration
         session_factory: SQLAlchemy session factory
         engine: SQLAlchemy engine
+        lifespan: Optional lifespan context manager for startup/shutdown
 
     Returns:
         FastAPI app instance
@@ -346,7 +345,7 @@ def create_app(config, session_factory, engine):
     app_config = config
     _session_factory = session_factory
 
-    app = FastAPI(title="wg-fleet")
+    app = FastAPI(title="wg-fleet", lifespan=lifespan)
 
     app.include_router(api_router)
     app.include_router(web_router)

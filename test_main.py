@@ -91,3 +91,35 @@ def test_reconcile_fleet_state(mock_wg, test_db):
 
     # Verify extra peer removed from WireGuard
     mock_wg.remove_peer.assert_called_once_with('testfleet', 'extra_key')
+
+def test_main_runs_startup_and_shutdown(test_db, tmp_path):
+    """Test main() builds an app whose lifespan runs startup and shutdown"""
+    from unittest.mock import AsyncMock
+    from fastapi.testclient import TestClient
+    import main
+
+    session_factory, engine, db_path = test_db
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text("""
+domain: test.internal
+prune_timeout: 30m
+fleets:
+  testfleet:
+    ip6: fd00::1
+    subnet: fd00::/64
+    external_ip: 1.2.3.4
+    port: 51820
+""")
+
+    with patch('sys.argv', ['main.py', '--config', str(config_path)]), \
+         patch('database.init_db', return_value=engine), \
+         patch('main.uvicorn') as mock_uvicorn, \
+         patch('main.startup', new_callable=AsyncMock) as mock_startup, \
+         patch('main.shutdown', new_callable=AsyncMock) as mock_shutdown:
+        main.main()
+
+        app = mock_uvicorn.run.call_args[0][0]
+        with TestClient(app) as client:
+            mock_startup.assert_awaited_once()
+            assert client.get('/').status_code == 200
+        mock_shutdown.assert_awaited_once()
