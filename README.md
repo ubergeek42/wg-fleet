@@ -434,7 +434,8 @@ from . import my_hook
 
 - `hooks/hosts_file.py`: Generates `/run/wg_fleet_hosts` for hostname resolution
 - `hooks/prometheus_sd.py`: Generates `/run/prometheus_targets.json` (Prometheus file-based service discovery, node_exporter on port 9100)
-- `hooks/ansible_inventory.py`: Generates `/run/ansible_inventory.yml` with one group per fleet
+- `hooks/ansible_inventory.py`: Generates `/run/ansible_inventory.yml` with one group per fleet,
+  hosts named by FQDN (`<hostname>.<fleet>.<domain>`)
 - `hooks/fleets_file.py`: Generates `/run/wg_fleets.json` on startup and `FLEETS_CHANGED`: the
   fleets served (not removed ones) with their interface, port, subnet, `node` and
   `admin_principals` (`["node:*"]` for static fleets), plus the user CA keys from fleets.json.

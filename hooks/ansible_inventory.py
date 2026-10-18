@@ -2,7 +2,7 @@
 Ansible inventory hook.
 
 Generates Ansible YAML inventory file when clients change.
-Each fleet becomes a group, hosts are named hostname.fleetname.
+Each fleet becomes a group, hosts are named by FQDN (hostname.fleetname.domain).
 """
 from hook_manager import register_hook, HookContext
 from models import Client
@@ -23,10 +23,13 @@ def ansible_inventory_hook(context: HookContext):
 
     Creates inventory with:
     - Each fleet as a group under 'all.children'
-    - Hosts named as hostname.fleetname (resolvable via hosts file)
+    - Hosts named by FQDN, hostname.fleetname.domain (resolvable via hosts file)
 
     Only includes clients with hostnames set.
-    No ansible_host needed since hosts file hook makes names resolvable.
+    No ansible_host: the hosts file makes names resolvable, and ssh checks a host
+    certificate against the name it connects to, which an address never matches.
+    FQDNs, not short names, because the management server only trusts the host CA
+    for *.icpcnet.internal.
     """
     # Every event can change the client set, so always regenerate
     try:
@@ -60,11 +63,8 @@ def ansible_inventory_hook(context: HookContext):
             }
 
             for client in clients:
-                host_name = f"{client.hostname}.{fleet_name}"
-                # No need for ansible_host - hosts file makes names resolvable
-                fleet_group['hosts'][host_name] = {
-                    #'ansible_host': client.assigned_ip
-                }
+                host_name = f"{client.hostname}.{fleet_name}.{context.config.domain}"
+                fleet_group['hosts'][host_name] = {}
 
             inventory['all']['children'][fleet_name] = fleet_group
 

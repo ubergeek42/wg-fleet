@@ -246,12 +246,12 @@ def test_ansible_inventory_hook_generates_yaml_inventory(test_db_with_clients, a
         # Check testfleet group
         testfleet = children['testfleet']
         assert 'hosts' in testfleet
-        assert 'host1.testfleet' in testfleet['hosts']
-        assert 'host2.testfleet' in testfleet['hosts']
+        assert 'host1.testfleet.test.internal' in testfleet['hosts']
+        assert 'host2.testfleet.test.internal' in testfleet['hosts']
 
         # Hosts should have empty dicts (no ansible_host needed - resolved via hosts file)
-        assert testfleet['hosts']['host1.testfleet'] == {}
-        assert testfleet['hosts']['host2.testfleet'] == {}
+        assert testfleet['hosts']['host1.testfleet.test.internal'] == {}
+        assert testfleet['hosts']['host2.testfleet.test.internal'] == {}
 
         # otherfleet should be empty (client has no hostname)
         otherfleet = children['otherfleet']
@@ -293,7 +293,7 @@ def test_ansible_inventory_hook_handles_startup(test_db_with_clients, app_config
 
         assert 'all' in inventory
         assert 'testfleet' in inventory['all']['children']
-        assert 'host1.testfleet' in inventory['all']['children']['testfleet']['hosts']
+        assert 'host1.testfleet.test.internal' in inventory['all']['children']['testfleet']['hosts']
 
     finally:
         hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = original_path
