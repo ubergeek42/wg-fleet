@@ -224,6 +224,7 @@ sudo journalctl -u wg-fleet -f
 - Database: `/var/lib/wg-fleet/clients.db`
 - WireGuard configs: `/etc/wireguard/wg_<fleet>.conf`, `/etc/wireguard/wgf<hash>.conf`
 - Last accepted fleets.json: `/var/lib/wg-fleet/fleets.json` and `fleets.json.sig`
+- Host CA: `/var/lib/wg-fleet/host_ca` and `host_ca.pub` (back these up)
 - Hosts file: `/run/wg_fleet_hosts`
 - Served fleets, for the management server's host-side script: `/run/wg_fleets.json`
 
@@ -287,9 +288,18 @@ sudo wg-quick up ./wg0.conf
 **Response:**
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "host_certificate": "ssh-ed25519-cert-v01@openssh.com AAAA..."
 }
 ```
+
+`host_certificate` is only present for clients of fleets from `fleets_url` that registered a
+host key and have a hostname. It certifies that host key for
+`<hostname>.<fleet>.<domain>` (the name after deduplication) until the fleet's
+`valid_until`, signed by the host CA. Every ping returns it; it's re-signed only when the
+name or `valid_until` changes. Clients install it as their sshd `HostCertificate` when it
+differs from the one they have. Static fleets never get certificates, since anyone can
+register in them.
 
 **Requirements:**
 - Must be called from an IP within the fleet's subnet (via WireGuard tunnel)
@@ -305,6 +315,23 @@ curl -X POST http://server:8000/fleet/southeast/ping -H "Content-Type: applicati
 # With hostname
 curl -X POST http://server:8000/fleet/southeast/ping -H "Content-Type: application/json" -d '{"hostname":"excavator"}'
 ```
+
+### Host CA
+
+**Endpoint:** `GET /ssh/host_ca.pub`
+
+The host CA's public key, created in `/var/lib/wg-fleet/host_ca` on first start (an existing
+key there, e.g. restored from a backup, is kept). Trust it with
+`@cert-authority *.icpcnet.internal <key>` in `known_hosts`, and give it to contestforge for
+configs' `ssh_host_ca_keys`. Back it up: a new CA means every `known_hosts` and config has to
+change.
+
+### Re-registration
+
+A client of a fleet from `fleets_url` that registers again with the same site and host key
+(a new WireGuard key after a reboot or VPN failure) takes over its previous record's hostname
+and certificate; the previous record and peer are removed at once instead of waiting to be
+pruned. A different host key never takes another machine's name.
 
 ### Admin Dashboard
 
@@ -437,7 +464,8 @@ from . import my_hook
 ### Available Events
 
 - `EventType.STARTUP`: Application startup
-- `EventType.CLIENT_ADDED`: New client registered (currently not fired: a new client has no hostname yet, so the existing hooks' output wouldn't change)
+- `EventType.CLIENT_ADDED`: A client re-registered and took over its previous hostname
+  (a brand-new client has no hostname yet, so the hooks' output wouldn't change)
 - `EventType.CLIENT_HOSTNAME_CHANGED`: Client hostname updated
 - `EventType.CLIENT_REMOVED`: Client pruned or removed
 - `EventType.FLEETS_CHANGED`: The served fleets changed (a new fleets.json, or a fleet

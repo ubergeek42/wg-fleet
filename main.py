@@ -14,6 +14,7 @@ from routes import create_app
 from pruning import prune_stale_clients
 from fleet_source import FleetSource
 from fleet_registry import initialize_fleets, refresh_fleets
+import host_ca
 import hooks  # Import to register hooks
 
 # Setup logging
@@ -59,6 +60,7 @@ def main():
         config = load_config(args.config)
 
         engine = init_db()
+        host_ca.ensure_host_ca(comment=f"wg-fleet host CA {config.server_name or 'wg-fleet'}")
         session_factory = get_session_factory(engine)
 
         source = FleetSource(config) if config.fleets_url else None

@@ -63,3 +63,12 @@ def host_key(tmp_path_factory):
     subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', 'root@icpc',
                     '-f', str(path)], check=True)
     return path, path.with_suffix('.pub').read_text().strip()
+
+
+@pytest.fixture(autouse=True)
+def host_ca_path(tmp_path, monkeypatch):
+    """Keep the host CA out of /var/lib/wg-fleet; created on first use like at startup"""
+    import host_ca
+    path = tmp_path / 'host_ca'
+    monkeypatch.setattr(host_ca, 'HOST_CA_PATH', str(path))
+    return path

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -12,6 +12,8 @@ import logging
 
 from models import Client
 from enrollment import RateLimiter, normalize_host_key, token_matches
+from fleet_registry import as_utc
+import host_ca
 import wireguard
 from hook_manager import trigger_hooks, EventType, HookContext
 import hooks  # Import to register hooks
@@ -48,6 +50,8 @@ class PingRequest(BaseModel):
 
 class PingResponse(BaseModel):
     status: str
+    # Host certificate for the client's host key and current name (fleets from fleets_url)
+    host_certificate: Optional[str] = None
 
 def allocate_random_ip(subnet_str: str) -> str:
     """
@@ -108,6 +112,16 @@ async def register_client(
             raise HTTPException(status_code=400, detail="host_key must be an ssh public key")
         site = body.site
 
+    # A machine that registers again (new WireGuard key after a reboot or VPN failure)
+    # takes over its previous record's hostname, instead of getting "name--2" until the
+    # old record is pruned. Only the same host key at the same site can do that.
+    previous = []
+    if host_key is not None:
+        previous = db.query(Client).filter_by(
+            fleet_id=fleet_name, site=site, host_key=host_key
+        ).order_by(Client.timestamp.desc()).all()
+    reclaimed = previous[0] if previous else None
+
     peer_added = False
 
     try:
@@ -144,11 +158,40 @@ async def register_client(
             site=site,
             host_key=host_key
         )
+        if reclaimed is not None:
+            client_record.hostname = reclaimed.hostname
+            client_record.host_certificate = reclaimed.host_certificate
+            client_record.host_certificate_name = reclaimed.host_certificate_name
+            client_record.host_certificate_valid_until = reclaimed.host_certificate_valid_until
+        old_peers = [old.public_key for old in previous]
+        for old in previous:
+            db.delete(old)
         db.add(client_record)
         db.commit()
 
         logger.info(f"Client registered: fleet={fleet_name}, site={site}, ip={client_ip}, "
                     f"source={request.client.host}")
+
+        if previous:
+            for old_peer in old_peers:
+                try:
+                    wireguard.remove_peer(fleet_config.interface, old_peer)
+                except Exception as e:
+                    # Pruning removes it later
+                    logger.error(f"Failed to remove the previous peer of a re-registered client: {e}")
+            logger.info(f"Client re-registered: fleet={fleet_name}, ip={client_ip}, "
+                        f"hostname={client_record.hostname} (replaces {len(previous)} record(s))")
+            # The name now points at the new address
+            trigger_hooks(HookContext(
+                event_type=EventType.CLIENT_ADDED,
+                config=app_config,
+                session_factory=_session_factory,
+                client_data={
+                    'ip': client_ip,
+                    'hostname': client_record.hostname,
+                    'fleet_id': fleet_name
+                }
+            ))
 
         return RegisterResponse(
             status="success",
@@ -208,7 +251,7 @@ def hostname_matches_request(current: Optional[str], requested: str) -> bool:
         return False
     return re.fullmatch(rf'{re.escape(requested)}(--\d+)?', current) is not None
 
-@api_router.post("/fleet/{fleet_name}/ping", response_model=PingResponse)
+@api_router.post("/fleet/{fleet_name}/ping", response_model=PingResponse, response_model_exclude_none=True)
 async def ping_client(
     fleet_name: str,
     ping_req: PingRequest,
@@ -280,6 +323,7 @@ async def ping_client(
             hostname_changed = True
             logger.info(f"Hostname updated: fleet={fleet_name}, ip={client_ip}, hostname={unique_hostname}")
 
+    host_certificate = host_certificate_for(fleet_name, fleet_config, client_record)
     db.commit()
 
     # Regenerate hosts file if hostname changed
@@ -295,7 +339,56 @@ async def ping_client(
             }
         ))
 
-    return PingResponse(status="ok")
+    return PingResponse(status="ok", host_certificate=host_certificate)
+
+def host_certificate_for(fleet_name: str, fleet_config, client_record: Client) -> Optional[str]:
+    """
+    The client's host certificate, signing a new one if its name or validity changed.
+
+    Every ping returns it, so a machine that rebooted (and kept its record and name)
+    still gets one, and a renewal needs nothing special. Only fleets from fleets_url
+    get certificates: anyone can register in a static fleet.
+
+    Returns:
+        The certificate, or None if the client doesn't get one
+    """
+    if fleet_config.static or fleet_config.removed or fleet_config.valid_until is None:
+        return None
+    if not client_record.host_key or not client_record.hostname:
+        return None
+    if fleet_config.valid_until <= datetime.now(UTC):
+        return None
+
+    if (client_record.host_certificate
+            and client_record.host_certificate_name == client_record.hostname
+            and as_utc(client_record.host_certificate_valid_until) == fleet_config.valid_until):
+        return client_record.host_certificate
+
+    principal = f"{client_record.hostname}.{fleet_name}.{app_config.domain}"
+    try:
+        certificate = host_ca.sign_host_key(
+            client_record.host_key,
+            principal=principal,
+            key_id=f"{fleet_name}/{client_record.hostname}/{client_record.id}",
+            valid_until=fleet_config.valid_until,
+        )
+    except Exception as e:
+        logger.error(f"Failed to sign host key for {principal}: {e}")
+        return None
+
+    client_record.host_certificate = certificate
+    client_record.host_certificate_name = client_record.hostname
+    client_record.host_certificate_valid_until = fleet_config.valid_until.astimezone(UTC).replace(tzinfo=None)
+    logger.info(f"Signed host certificate for {principal}, valid until {fleet_config.valid_until}")
+    return certificate
+
+@api_router.get("/ssh/host_ca.pub", response_class=PlainTextResponse)
+async def get_host_ca():
+    """The host CA's public key, for known_hosts and contestforge's ssh_host_ca_keys"""
+    try:
+        return host_ca.public_key() + '\n'
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No host CA")
 
 # Jinja2 templates setup
 templates = Jinja2Templates(directory="templates")
@@ -340,8 +433,14 @@ templates.env.filters['humanize'] = humanize_timedelta
 @web_router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Fleet list page"""
+    try:
+        host_ca_key = host_ca.public_key()
+    except FileNotFoundError:
+        host_ca_key = None
     return templates.TemplateResponse(request, "index.html", {
-        "fleets": app_config.fleets.keys()
+        "fleets": app_config.fleets.keys(),
+        "host_ca_key": host_ca_key,
+        "domain": app_config.domain
     })
 
 @web_router.get("/fleet/{fleet_name}", response_class=HTMLResponse)

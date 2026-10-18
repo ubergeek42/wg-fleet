@@ -18,6 +18,9 @@ class Client(Base):
         timestamp: Last registration or ping time
         site: contestforge site id the client enrolled as (fleets from fleets_url only)
         host_key: The machine's ssh host public key, "<type> <base64>" (fleets from fleets_url only)
+        host_certificate: Last host certificate issued for host_key
+        host_certificate_name: The hostname that certificate is for
+        host_certificate_valid_until: When that certificate expires (the fleet's valid_until)
     """
     __tablename__ = 'clients'
 
@@ -30,6 +33,9 @@ class Client(Base):
     timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
     site = Column(String, nullable=True)
     host_key = Column(String, nullable=True)
+    host_certificate = Column(String, nullable=True)
+    host_certificate_name = Column(String, nullable=True)
+    host_certificate_valid_until = Column(DateTime, nullable=True)
 
     def __repr__(self):
         return f"<Client(fleet={self.fleet_id}, ip={self.assigned_ip}, hostname={self.hostname})>"

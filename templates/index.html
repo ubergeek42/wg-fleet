@@ -40,5 +40,11 @@
         <li><a href="/fleet/{{ fleet_name }}">{{ fleet_name }}</a></li>
     {% endfor %}
     </ul>
+    {% if host_ca_key %}
+    <h2>Host CA</h2>
+    <p>Machines in fleets from contestforge get host certificates from this CA. To trust them,
+    add to <code>known_hosts</code> (also at <a href="/ssh/host_ca.pub">/ssh/host_ca.pub</a>):</p>
+    <pre>@cert-authority *.{{ domain }} {{ host_ca_key }}</pre>
+    {% endif %}
 </body>
 </html>
