@@ -23,7 +23,7 @@ def prometheus_sd_hook(context: HookContext):
     Format follows Prometheus file_sd_config specification.
 
     Target format: [<ipv6>]:9100 (node_exporter port)
-    Labels: hostname, fleet, job
+    Labels: hostname, fleet, job, and site for fleets from fleets_url
     """
     # Every event can change the client set, so always regenerate
     try:
@@ -36,13 +36,16 @@ def prometheus_sd_hook(context: HookContext):
             ).all()
 
             for client in clients:
+                labels = {
+                    'job': 'node_exporter',
+                    'hostname': client.hostname,
+                    'fleet': client.fleet_id
+                }
+                if client.site:
+                    labels['site'] = client.site
                 targets.append({
                     'targets': [f'[{client.assigned_ip}]:9100'],
-                    'labels': {
-                        'job': 'node_exporter',
-                        'hostname': client.hostname,
-                        'fleet': client.fleet_id
-                    }
+                    'labels': labels
                 })
 
         # Write atomically (write to temp, then rename)

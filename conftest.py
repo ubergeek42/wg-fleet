@@ -53,3 +53,13 @@ def fleets_file_path(tmp_path, monkeypatch):
     path = tmp_path / 'wg_fleets.json'
     monkeypatch.setattr(hooks.fleets_file, 'FLEETS_FILE_PATH', str(path))
     return path
+
+
+@pytest.fixture(scope='session')
+def host_key(tmp_path_factory):
+    """A machine's ed25519 host key pair: (private key path, public key line)"""
+    import subprocess
+    path = tmp_path_factory.mktemp('hostkey') / 'ssh_host_ed25519_key'
+    subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', 'root@icpc',
+                    '-f', str(path)], check=True)
+    return path, path.with_suffix('.pub').read_text().strip()

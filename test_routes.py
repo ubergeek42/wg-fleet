@@ -23,6 +23,7 @@ def test_app():
     config = MagicMock()
     config.domain = "test.internal"
     config.prune_timeout = "30m"
+    config.register_rate_limit = 60
     config.fleets = {
         'testfleet': FleetConfig(
             ip6='fd00::1',
@@ -231,3 +232,147 @@ def test_ping_accepts_valid_hostname(mock_trigger_hooks, hostname, test_app):
 
     assert ping(test_client, "fd00::100", hostname).status_code == 200
     assert hostname_of(session_factory, "fd00::100") == hostname
+
+# Registration to fleets from fleets_url (enrollment tokens)
+
+import hashlib
+from datetime import datetime, timedelta, UTC
+from enrollment import RateLimiter, normalize_host_key, token_matches
+
+SITE = 'BigSouth2026/MidAtlantic/VirginiaTech'
+TOKEN = 'dGhpcy1pcy1hLXRlc3QtZW5yb2xsbWVudC10b2tlbg'
+
+@pytest.fixture
+def url_fleet(test_app):
+    test_client, config, session_factory = test_app
+    config.fleets['bs26-ma'] = FleetConfig(
+        ip6='fd01::1', subnet='fd01::/64', external_ip='1.2.3.4', port=51830,
+        interface='wgf12345678', static=False, node='BigSouth2026/MidAtlantic',
+        valid_until=datetime.now(UTC) + timedelta(days=30),
+        sites={SITE: hashlib.sha256(TOKEN.encode()).hexdigest()},
+        admin_principals=['node:BigSouth2026'],
+    )
+    return test_app
+
+@pytest.fixture
+def mock_wg():
+    with patch('routes.wireguard') as mock_wg, patch('routes.allocate_random_ip', return_value='fd01::1234'):
+        mock_wg.generate_keypair.return_value = ('client_priv', 'client_pub')
+        mock_wg.get_server_public_key.return_value = 'server_pub'
+        mock_wg.build_client_config.return_value = '[Interface]\nPrivateKey = client_priv'
+        yield mock_wg
+
+def register(test_client, fleet='bs26-ma', **body):
+    return test_client.post(f'/fleet/{fleet}/register', json=body or None)
+
+def test_register_with_enrollment_token(url_fleet, mock_wg, host_key):
+    """Test a machine with its site's token is registered, with its site and host key stored"""
+    test_client, config, session_factory = url_fleet
+
+    response = register(test_client, site=SITE, token=TOKEN, host_key=host_key[1])
+
+    assert response.status_code == 200
+    mock_wg.add_peer.assert_called_once_with('wgf12345678', 'client_pub', 'fd01::1234')
+    with session_factory() as session:
+        client = session.query(DBClient).one()
+        assert client.site == SITE
+        # The comment is dropped
+        assert client.host_key == ' '.join(host_key[1].split()[:2])
+
+@pytest.mark.parametrize('body', [
+    {},
+    {'site': SITE},
+    {'site': SITE, 'token': 'wrong'},
+    {'site': 'BigSouth2026/MidAtlantic/Other', 'token': TOKEN},
+    {'token': TOKEN},
+])
+def test_register_refuses_without_valid_token(body, url_fleet, mock_wg, host_key):
+    """Test registration to a fleet from fleets_url needs a known site and its token"""
+    test_client, config, session_factory = url_fleet
+
+    response = register(test_client, host_key=host_key[1], **body)
+
+    assert response.status_code == 403
+    mock_wg.add_peer.assert_not_called()
+
+def test_register_refuses_without_body(url_fleet, mock_wg):
+    """Test a bare POST, as old images send, can't join a fleet from fleets_url"""
+    test_client, config, session_factory = url_fleet
+    assert test_client.post('/fleet/bs26-ma/register').status_code == 403
+
+@pytest.mark.parametrize('bad_key', [None, '', 'ssh-ed25519', 'ssh-dss AAAA', 'ssh-ed25519 !!!notbase64',
+                                     'ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQAB'])
+def test_register_refuses_bad_host_key(bad_key, url_fleet, mock_wg):
+    """Test a missing or malformed host key is refused before anything is set up"""
+    test_client, config, session_factory = url_fleet
+
+    response = register(test_client, site=SITE, token=TOKEN, host_key=bad_key)
+
+    assert response.status_code == 400
+    mock_wg.add_peer.assert_not_called()
+
+def test_register_refuses_removed_fleet(url_fleet, mock_wg, host_key):
+    """Test a removed or expired fleet takes no new registrations, even with a valid token"""
+    test_client, config, session_factory = url_fleet
+    config.fleets['bs26-ma'].removed = True
+
+    response = register(test_client, site=SITE, token=TOKEN, host_key=host_key[1])
+
+    assert response.status_code == 403
+
+def test_static_fleet_ignores_enrollment_fields(test_app, mock_wg, host_key):
+    """Test static fleets register anyone and don't store an unauthenticated site or host key"""
+    test_client, config, session_factory = test_app
+
+    response = register(test_client, fleet='testfleet', site=SITE, token='anything', host_key=host_key[1])
+
+    assert response.status_code == 200
+    with session_factory() as session:
+        client = session.query(DBClient).one()
+        assert (client.site, client.host_key) == (None, None)
+
+def test_register_rate_limit(url_fleet, mock_wg, host_key):
+    """Test registrations per fleet are limited, failed ones included"""
+    test_client, config, session_factory = url_fleet
+    import routes
+    routes._register_limiter = RateLimiter(2)
+
+    assert register(test_client, site=SITE, token='wrong', host_key=host_key[1]).status_code == 403
+    assert register(test_client, site=SITE, token=TOKEN, host_key=host_key[1]).status_code == 200
+    assert register(test_client, site=SITE, token=TOKEN, host_key=host_key[1]).status_code == 429
+    # Other fleets have their own limit
+    assert register(test_client, fleet='testfleet').status_code == 200
+
+def test_rate_limiter_window():
+    """Test the limiter forgets events older than its window"""
+    now = [0.0]
+    limiter = RateLimiter(2, window=60, clock=lambda: now[0])
+    assert limiter.allow('f') and limiter.allow('f')
+    assert not limiter.allow('f')
+    now[0] = 61
+    assert limiter.allow('f')
+
+def test_token_matches():
+    """Test tokens are compared by their sha256"""
+    assert token_matches(TOKEN, hashlib.sha256(TOKEN.encode()).hexdigest())
+    assert not token_matches(TOKEN + 'x', hashlib.sha256(TOKEN.encode()).hexdigest())
+    assert not token_matches(TOKEN, None)
+
+def test_normalize_host_key(host_key):
+    """Test host keys are reduced to type and blob, and a blob of another type is refused"""
+    key_type, blob = host_key[1].split()[:2]
+    assert normalize_host_key(host_key[1]) == f'{key_type} {blob}'
+    assert normalize_host_key(f'ecdsa-sha2-nistp256 {blob}') is None
+
+def test_dashboard_shows_site_and_token_warning(url_fleet, mock_wg, host_key):
+    """Test the fleet page shows each client's site and warns that rotating a token revokes it"""
+    test_client, config, session_factory = url_fleet
+    register(test_client, site=SITE, token=TOKEN, host_key=host_key[1])
+    mock_wg.list_peers.return_value = []
+
+    page = test_client.get('/fleet/bs26-ma').text
+
+    assert SITE in page
+    assert 'BigSouth2026/MidAtlantic' in page
+    assert 'Rotating a site' in page
+    assert 'Rotating a site' not in test_client.get('/fleet/testfleet').text

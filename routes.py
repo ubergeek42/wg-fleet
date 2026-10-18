@@ -11,6 +11,7 @@ from datetime import datetime, UTC
 import logging
 
 from models import Client
+from enrollment import RateLimiter, normalize_host_key, token_matches
 import wireguard
 from hook_manager import trigger_hooks, EventType, HookContext
 import hooks  # Import to register hooks
@@ -23,11 +24,18 @@ web_router = APIRouter()
 # Global config and session factory (set by create_app)
 app_config = None
 _session_factory = None
+_register_limiter = None
 
 # Dependency for database session
 def get_db_session():
     with _session_factory() as session:
         yield session
+
+class RegisterRequest(BaseModel):
+    # Required for fleets from fleets_url; static fleets ignore them
+    site: Optional[str] = None
+    token: Optional[str] = None
+    host_key: Optional[str] = None
 
 class RegisterResponse(BaseModel):
     status: str
@@ -61,18 +69,20 @@ def allocate_random_ip(subnet_str: str) -> str:
 async def register_client(
     fleet_name: str,
     request: Request,
+    body: Optional[RegisterRequest] = None,
     db: Session = Depends(get_db_session)
 ):
     """
     Register a new client to the fleet.
 
-    1. Validate fleet exists
-    2. Generate keypair
-    3. Allocate random IPv6
-    4. Build client config
-    5. Add peer to WireGuard
-    6. Save to database (removing the peer again if this fails)
-    7. Return WireGuard config
+    1. Validate fleet exists, accepts registrations, and isn't over its rate limit
+    2. For fleets from fleets_url, check the site's enrollment token and the host key
+    3. Generate keypair
+    4. Allocate random IPv6
+    5. Build client config
+    6. Add peer to WireGuard
+    7. Save to database (removing the peer again if this fails)
+    8. Return WireGuard config
     """
     # Validate fleet exists
     if fleet_name not in app_config.fleets:
@@ -81,6 +91,23 @@ async def register_client(
     fleet_config = app_config.fleets[fleet_name]
     if fleet_config.removed:
         raise HTTPException(status_code=403, detail=f"Fleet '{fleet_name}' no longer accepts registrations")
+    if not _register_limiter.allow(fleet_name):
+        logger.warning(f"Registration rate limit hit for fleet {fleet_name}")
+        raise HTTPException(status_code=429, detail="Too many registrations, try again later")
+
+    site = host_key = None
+    if not fleet_config.static:
+        body = body or RegisterRequest()
+        if not body.site or not body.token or not token_matches(
+                body.token, fleet_config.sites.get(body.site)):
+            logger.warning(f"Registration refused: fleet={fleet_name}, site={body.site!r}, "
+                           f"source={request.client.host}: unknown site or bad enrollment token")
+            raise HTTPException(status_code=403, detail="Unknown site or bad enrollment token")
+        host_key = normalize_host_key(body.host_key or '')
+        if host_key is None:
+            raise HTTPException(status_code=400, detail="host_key must be an ssh public key")
+        site = body.site
+
     peer_added = False
 
     try:
@@ -113,12 +140,15 @@ async def register_client(
             assigned_ip=client_ip,
             http_request_ip=request.client.host,
             hostname=None,
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
+            site=site,
+            host_key=host_key
         )
         db.add(client_record)
         db.commit()
 
-        logger.info(f"Client registered: fleet={fleet_name}, ip={client_ip}, source={request.client.host}")
+        logger.info(f"Client registered: fleet={fleet_name}, site={site}, ip={client_ip}, "
+                    f"source={request.client.host}")
 
         return RegisterResponse(
             status="success",
@@ -366,9 +396,10 @@ def create_app(config, session_factory, engine, lifespan=None):
     """
     from fastapi import FastAPI
 
-    global app_config, _session_factory
+    global app_config, _session_factory, _register_limiter
     app_config = config
     _session_factory = session_factory
+    _register_limiter = RateLimiter(config.register_rate_limit)
 
     app = FastAPI(title="wg-fleet", lifespan=lifespan)
 

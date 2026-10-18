@@ -297,3 +297,39 @@ def test_ansible_inventory_hook_handles_startup(test_db_with_clients, app_config
 
     finally:
         hooks.ansible_inventory.ANSIBLE_INVENTORY_PATH = original_path
+
+
+def test_site_in_inventory_and_prometheus(app_config, hook_output_paths):
+    """Test a client's contestforge site shows up as an ansible host var and a Prometheus label"""
+    import json
+    from hooks.ansible_inventory import ansible_inventory_hook
+    from hooks.prometheus_sd import prometheus_sd_hook
+
+    fd, db_path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+    engine = create_engine(f'sqlite:///{db_path}')
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        session.add_all([
+            Client(fleet_id='testfleet', public_key='k1', assigned_ip='fd00::100', http_request_ip='1.2.3.4',
+                   hostname='t101', site='BigSouth2026/MidAtlantic/VirginiaTech', timestamp=datetime.now(UTC)),
+            Client(fleet_id='testfleet', public_key='k2', assigned_ip='fd00::101', http_request_ip='1.2.3.4',
+                   hostname='t102', timestamp=datetime.now(UTC)),
+        ])
+        session.commit()
+
+    try:
+        context = HookContext(event_type=EventType.STARTUP, config=app_config, session_factory=session_factory)
+        ansible_inventory_hook(context)
+        prometheus_sd_hook(context)
+
+        hosts = yaml.safe_load(hook_output_paths['ansible'].read_text())['all']['children']['testfleet']['hosts']
+        assert hosts['t101.testfleet.test.internal'] == {'site': 'BigSouth2026/MidAtlantic/VirginiaTech'}
+        assert hosts['t102.testfleet.test.internal'] == {}
+
+        labels = {t['labels']['hostname']: t['labels'] for t in json.loads(hook_output_paths['prometheus'].read_text())}
+        assert labels['t101']['site'] == 'BigSouth2026/MidAtlantic/VirginiaTech'
+        assert 'site' not in labels['t102']
+    finally:
+        os.unlink(db_path)

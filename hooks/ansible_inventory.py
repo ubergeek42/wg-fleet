@@ -24,6 +24,7 @@ def ansible_inventory_hook(context: HookContext):
     Creates inventory with:
     - Each fleet as a group under 'all.children'
     - Hosts named by FQDN, hostname.fleetname.domain (resolvable via hosts file)
+    - A `site` host var with the contestforge site, for fleets from fleets_url
 
     Only includes clients with hostnames set.
     No ansible_host: the hosts file makes names resolvable, and ssh checks a host
@@ -64,7 +65,7 @@ def ansible_inventory_hook(context: HookContext):
 
             for client in clients:
                 host_name = f"{client.hostname}.{fleet_name}.{context.config.domain}"
-                fleet_group['hosts'][host_name] = {}
+                fleet_group['hosts'][host_name] = {'site': client.site} if client.site else {}
 
             inventory['all']['children'][fleet_name] = fleet_group
 

@@ -145,7 +145,7 @@ Only hours and minutes are supported, in that order. An invalid value is rejecte
 
 ### Database Setup
 
-The database is automatically initialized on first startup. By default, it's stored at `/var/lib/wg-fleet/clients.db`.
+The database is automatically initialized on first startup. By default, it's stored at `/var/lib/wg-fleet/clients.db`. Columns added by newer versions are added to an existing database on startup.
 
 Ensure the directory exists and has proper permissions:
 
@@ -235,7 +235,20 @@ sudo journalctl -u wg-fleet -f
 
 **Description:** Register a new client to the fleet. Returns WireGuard configuration.
 
-**Request:** No body required.
+**Request:** No body required for static fleets. Fleets from `fleets_url` require:
+
+```json
+{
+  "site": "BigSouth2026/MidAtlantic/VirginiaTech",
+  "token": "<the site's enrollment token>",
+  "host_key": "ssh-ed25519 AAAA..."
+}
+```
+
+The token's sha256 must match the site's `token_sha256` in fleets.json; an unknown site or
+a wrong token gets 403, and a missing or malformed `host_key` 400. Static fleets ignore these
+fields and store neither. A removed or expired fleet refuses every registration (403), and
+more than `register_rate_limit` registrations to one fleet in a minute get 429.
 
 **Response:**
 ```json
@@ -573,14 +586,16 @@ cat /run/wg_fleet_hosts | grep myhost
 
 ## Security Considerations
 
-### No Authentication
+### Authentication
 
-wg-fleet currently has **no authentication** on any endpoint. This design assumes:
-- Deployment in trusted network
-- Network-level security (firewall rules)
-- Clients operate in environment where secrets would be compromised anyway
+Registration to fleets from `fleets_url` needs the site's enrollment token, which machines
+get in their site's encrypted config; wg-fleet only ever sees the token's hash. Machines keep
+using the token they got at setup, so rotating a site's token in contestforge stops machines
+already set up there from re-registering after a reboot or VPN failure.
 
-**Recommendation:** Use a reverse proxy with authentication if deploying in untrusted environments.
+Static fleets accept registration from anyone who can reach the server. The dashboard has
+no authentication of its own. Put a reverse proxy in front: basic auth for the dashboard, and
+a per-source-IP rate limit (e.g. nginx `limit_req`) on `/fleet/*/register`.
 
 ### IP Validation
 

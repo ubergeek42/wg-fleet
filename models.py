@@ -16,6 +16,8 @@ class Client(Base):
         http_request_ip: Source IP from registration request
         hostname: Optional client hostname
         timestamp: Last registration or ping time
+        site: contestforge site id the client enrolled as (fleets from fleets_url only)
+        host_key: The machine's ssh host public key, "<type> <base64>" (fleets from fleets_url only)
     """
     __tablename__ = 'clients'
 
@@ -26,6 +28,8 @@ class Client(Base):
     http_request_ip = Column(String, nullable=False)
     hostname = Column(String, nullable=True)
     timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    site = Column(String, nullable=True)
+    host_key = Column(String, nullable=True)
 
     def __repr__(self):
         return f"<Client(fleet={self.fleet_id}, ip={self.assigned_ip}, hostname={self.hostname})>"

@@ -61,13 +61,49 @@
             <th>WireGuard Port</th>
             <td>{{ fleet_config.port }}</td>
         </tr>
+        <tr>
+            <th>Interface</th>
+            <td>{{ fleet_config.interface }}</td>
+        </tr>
+        {% if fleet_config.static %}
+        <tr>
+            <th>Source</th>
+            <td>static (config file); anyone can register</td>
+        </tr>
+        {% else %}
+        <tr>
+            <th>Source</th>
+            <td>contestforge node {{ fleet_config.node or '(not in fleets.json yet)' }}</td>
+        </tr>
+        <tr>
+            <th>Valid Until</th>
+            <td>{{ fleet_config.valid_until.strftime('%Y-%m-%d %H:%M UTC') if fleet_config.valid_until else 'unknown' }}</td>
+        </tr>
+        <tr>
+            <th>Sites</th>
+            <td>{{ fleet_config.sites|length }}</td>
+        </tr>
+        {% endif %}
+        {% if fleet_config.removed %}
+        <tr>
+            <th>Status</th>
+            <td>Removed or expired: no new registrations. The interface is removed once its clients are gone.</td>
+        </tr>
+        {% endif %}
     </table>
+    {% if not fleet_config.static %}
+    <p>Machines register with their site's enrollment token, which they got from their config
+    at setup and never fetch again. Rotating a site's token in contestforge revokes it: machines
+    already set up at that site can't re-register (after a reboot or VPN failure) until they're
+    set up again.</p>
+    {% endif %}
 
     <h2>Active Clients ({{ clients|length }})</h2>
     <table>
         <thead>
             <tr>
                 <th>Hostname</th>
+                <th>Site</th>
                 <th>Assigned IP</th>
                 <th>Public Key</th>
                 <th>Source IP</th>
@@ -79,6 +115,7 @@
         {% for client in clients %}
             <tr>
                 <td>{{ client.hostname or '(none)' }}</td>
+                <td>{{ client.site or '' }}</td>
                 <td>{{ client.assigned_ip }}</td>
                 <td>{{ client.public_key[:16] }}...</td>
                 <td>{{ client.http_request_ip }}</td>
