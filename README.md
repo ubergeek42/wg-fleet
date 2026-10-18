@@ -115,7 +115,6 @@ config_signers: |
 - `refresh_interval` (default `1m`)
 - `removed_fleet_grace` (default `24h`): how long a removed fleet's interface is kept after
   its last client is gone
-- `register_rate_limit` (default `60`): registrations allowed per fleet per minute
 
 How they behave:
 
@@ -248,8 +247,7 @@ sudo journalctl -u wg-fleet -f
 
 The token's sha256 must match the site's `token_sha256` in fleets.json; an unknown site or
 a wrong token gets 403, and a missing or malformed `host_key` 400. Static fleets ignore these
-fields and store neither. A removed or expired fleet refuses every registration (403), and
-more than `register_rate_limit` registrations to one fleet in a minute get 429.
+fields and store neither. A removed or expired fleet refuses every registration (403).
 
 **Response:**
 ```json
@@ -623,7 +621,13 @@ already set up there from re-registering after a reboot or VPN failure.
 
 Static fleets accept registration from anyone who can reach the server. The dashboard has
 no authentication of its own. Put a reverse proxy in front: basic auth for the dashboard, and
-a per-source-IP rate limit (e.g. nginx `limit_req`) on `/fleet/*/register`.
+optionally a per-source-IP rate limit (e.g. nginx `limit_req`) on `/fleet/*/register`. Make
+its burst generous: a site's machines usually share one NAT address and all register at
+once (at setup, or after a power cut or a server restart).
+
+wg-fleet itself has no rate limit. A bad token is refused after one sha256, before anything
+is created, and tokens are too long to guess; a limit per fleet would mostly let anyone
+lock a fleet's machines out by sending bad requests.
 
 ### IP Validation
 

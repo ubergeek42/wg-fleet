@@ -402,7 +402,6 @@ fleets:
 @pytest.mark.parametrize('line, error', [
     ('refresh_interval: 30s', 'refresh_interval'),
     ('removed_fleet_grace: 1d', 'removed_fleet_grace'),
-    ('register_rate_limit: 0', 'register_rate_limit'),
     ('fleets_url: ftp://example.org/fleets.json', 'fleets_url'),
 ])
 def test_invalid_server_settings(line, error, tmp_path):

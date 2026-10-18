@@ -5,14 +5,12 @@ A machine registers with its contestforge site id, the site's enrollment token (
 the site's encrypted config) and its ssh host public key. fleets.json carries only the
 token's sha256, so wg-fleet never holds a token.
 """
-from collections import defaultdict, deque
-from typing import Deque, Dict, Optional
+from typing import Optional
 import base64
 import binascii
 import hashlib
 import hmac
 import struct
-import time
 
 # Host key types wg-fleet will sign certificates for
 HOST_KEY_TYPES = {
@@ -57,22 +55,3 @@ def normalize_host_key(host_key: str) -> Optional[str]:
         return None
     return f'{key_type} {blob_b64}'
 
-
-class RateLimiter:
-    """Allows at most `limit` events per key in any `window` seconds"""
-
-    def __init__(self, limit: int, window: float = 60, clock=time.monotonic):
-        self.limit = limit
-        self.window = window
-        self.clock = clock
-        self.events: Dict[str, Deque[float]] = defaultdict(deque)
-
-    def allow(self, key: str) -> bool:
-        now = self.clock()
-        events = self.events[key]
-        while events and events[0] <= now - self.window:
-            events.popleft()
-        if len(events) >= self.limit:
-            return False
-        events.append(now)
-        return True

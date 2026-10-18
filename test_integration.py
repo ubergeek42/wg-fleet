@@ -23,7 +23,6 @@ def integration_app():
     config = MagicMock()
     config.domain = "test.internal"
     config.prune_timeout = "30m"
-    config.register_rate_limit = 60
     config.fleets = {
         'testfleet': FleetConfig(
             ip6='fd00::1',

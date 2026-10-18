@@ -57,8 +57,6 @@ class Config:
     # How long a removed or expired fleet with no clients left is kept before its
     # interface is torn down
     removed_fleet_grace: str = '24h'
-    # Registrations allowed per fleet per minute
-    register_rate_limit: int = 60
     # User CA keys from fleets.json, for the bastion (/run/wg_fleets.json)
     user_ca_keys: List[str] = field(default_factory=list)
 
@@ -199,10 +197,6 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
             except ValueError as e:
                 raise ValueError(f"Invalid '{key}': {e}")
 
-    rate_limit = data.get('register_rate_limit', 60)
-    if not isinstance(rate_limit, int) or isinstance(rate_limit, bool) or rate_limit < 1:
-        raise ValueError("'register_rate_limit' must be a positive integer")
-
     # Parse fleets
     fleets = {}
     for name, fleet_data in (data.get('fleets') or {}).items():
@@ -246,5 +240,4 @@ def load_config(path: str = "/etc/wg-fleet.yaml") -> Config:
         external_ip=external_ip,
         refresh_interval=data.get('refresh_interval', '1m'),
         removed_fleet_grace=data.get('removed_fleet_grace', '24h'),
-        register_rate_limit=rate_limit,
     )

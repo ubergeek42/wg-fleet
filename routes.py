@@ -11,7 +11,7 @@ from datetime import datetime, UTC
 import logging
 
 from models import Client
-from enrollment import RateLimiter, normalize_host_key, token_matches
+from enrollment import normalize_host_key, token_matches
 from fleet_registry import as_utc
 import host_ca
 import wireguard
@@ -26,7 +26,6 @@ web_router = APIRouter()
 # Global config and session factory (set by create_app)
 app_config = None
 _session_factory = None
-_register_limiter = None
 
 # Dependency for database session
 def get_db_session():
@@ -79,7 +78,7 @@ async def register_client(
     """
     Register a new client to the fleet.
 
-    1. Validate fleet exists, accepts registrations, and isn't over its rate limit
+    1. Validate fleet exists and accepts registrations
     2. For fleets from fleets_url, check the site's enrollment token and the host key
     3. Generate keypair
     4. Allocate random IPv6
@@ -95,9 +94,6 @@ async def register_client(
     fleet_config = app_config.fleets[fleet_name]
     if fleet_config.removed:
         raise HTTPException(status_code=403, detail=f"Fleet '{fleet_name}' no longer accepts registrations")
-    if not _register_limiter.allow(fleet_name):
-        logger.warning(f"Registration rate limit hit for fleet {fleet_name}")
-        raise HTTPException(status_code=429, detail="Too many registrations, try again later")
 
     site = host_key = None
     if not fleet_config.static:
@@ -495,10 +491,9 @@ def create_app(config, session_factory, engine, lifespan=None):
     """
     from fastapi import FastAPI
 
-    global app_config, _session_factory, _register_limiter
+    global app_config, _session_factory
     app_config = config
     _session_factory = session_factory
-    _register_limiter = RateLimiter(config.register_rate_limit)
 
     app = FastAPI(title="wg-fleet", lifespan=lifespan)
 

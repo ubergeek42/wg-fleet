@@ -23,7 +23,6 @@ def test_app():
     config = MagicMock()
     config.domain = "test.internal"
     config.prune_timeout = "30m"
-    config.register_rate_limit = 60
     config.fleets = {
         'testfleet': FleetConfig(
             ip6='fd00::1',
@@ -237,7 +236,7 @@ def test_ping_accepts_valid_hostname(mock_trigger_hooks, hostname, test_app):
 
 import hashlib
 from datetime import datetime, timedelta, UTC
-from enrollment import RateLimiter, normalize_host_key, token_matches
+from enrollment import normalize_host_key, token_matches
 
 SITE = 'BigSouth2026/MidAtlantic/VirginiaTech'
 TOKEN = 'dGhpcy1pcy1hLXRlc3QtZW5yb2xsbWVudC10b2tlbg'
@@ -330,27 +329,6 @@ def test_static_fleet_ignores_enrollment_fields(test_app, mock_wg, host_key):
     with session_factory() as session:
         client = session.query(DBClient).one()
         assert (client.site, client.host_key) == (None, None)
-
-def test_register_rate_limit(url_fleet, mock_wg, host_key):
-    """Test registrations per fleet are limited, failed ones included"""
-    test_client, config, session_factory = url_fleet
-    import routes
-    routes._register_limiter = RateLimiter(2)
-
-    assert register(test_client, site=SITE, token='wrong', host_key=host_key[1]).status_code == 403
-    assert register(test_client, site=SITE, token=TOKEN, host_key=host_key[1]).status_code == 200
-    assert register(test_client, site=SITE, token=TOKEN, host_key=host_key[1]).status_code == 429
-    # Other fleets have their own limit
-    assert register(test_client, fleet='testfleet').status_code == 200
-
-def test_rate_limiter_window():
-    """Test the limiter forgets events older than its window"""
-    now = [0.0]
-    limiter = RateLimiter(2, window=60, clock=lambda: now[0])
-    assert limiter.allow('f') and limiter.allow('f')
-    assert not limiter.allow('f')
-    now[0] = 61
-    assert limiter.allow('f')
 
 def test_token_matches():
     """Test tokens are compared by their sha256"""
