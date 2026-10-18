@@ -16,3 +16,10 @@ fleets:
     subnet: fd00:a0a8:34d:2000::/64
     external_ip: 1.2.3.4
     port: 51821
+
+# Fleets can also come from contestforge's signed fleets.json (see README):
+# fleets_url: https://configs.cloudcontest.org/v2/fleets.json
+# server_name: mgmt.env.cloudcontest.org
+# external_ip: 1.2.3.4
+# config_signers: |
+#   contestforge ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...

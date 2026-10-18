@@ -83,13 +83,56 @@ fleets:
 
 - `domain`: Base domain for generating FQDNs (hostname.fleet.domain)
 - `prune_timeout`: Duration string for client inactivity timeout (e.g., "30m", "1h", "2h30m")
-- `fleets`: Dictionary of fleet configurations. Fleet names must be 1-12 characters of
+- `fleets`: Dictionary of static fleet configurations. Fleet names must be 1-12 characters of
   lowercase letters, digits, or `-` (the name becomes the interface `wg_<name>`, which
-  Linux limits to 15 characters)
+  Linux limits to 15 characters). Static fleets accept registration from anyone.
   - `ip6`: Server's IPv6 address for this fleet
   - `subnet`: IPv6 subnet for client allocation (CIDR notation)
-  - `external_ip`: Public IP address (IPv4 or IPv6) clients connect to
+  - `external_ip`: Public IP address (IPv4 or IPv6) clients connect to. Optional when the
+    server-level `external_ip` is set.
   - `port`: UDP port for this WireGuard interface
+
+### Fleets from contestforge
+
+Fleets can also come from a signed `fleets.json` that contestforge publishes to a static
+bucket. wg-fleet fetches it every `refresh_interval`, verifies its signature, and serves the
+entries whose `server` is its `server_name`. Static fleets can be configured alongside.
+
+```yaml
+fleets_url: https://configs.cloudcontest.org/v2/fleets.json
+server_name: mgmt.env.cloudcontest.org
+external_ip: 203.0.113.5
+config_signers: |
+  contestforge ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
+```
+
+- `fleets_url`: URL of `fleets.json`; its signature is at `<fleets_url>.sig`
+- `server_name`: Which `fleets.json` entries are this server's
+- `external_ip`: WireGuard endpoint for these fleets (fleets.json doesn't carry one)
+- `config_signers`: `allowed_signers` lines (a list, or one block) for the keys that may sign
+  `fleets.json`, as printed by contestforge's `flask signing-key init`
+- `config_signer_id` (default `contestforge`): signer identity the signature must match
+- `refresh_interval` (default `1m`)
+- `removed_fleet_grace` (default `24h`): how long a removed fleet's interface is kept after
+  its last client is gone
+- `register_rate_limit` (default `60`): registrations allowed per fleet per minute
+
+How they behave:
+
+- The file is verified with `ssh-keygen -Y verify -n contestforge` against
+  `config_signers`. A file that doesn't verify, or whose `revision` is lower than the last
+  accepted one, is refused and logged, and the previous one stays in use.
+- The last accepted file is kept in `/var/lib/wg-fleet/fleets.json` (with `.sig`), so
+  wg-fleet starts with the same fleets when the URL is unreachable. If contestforge's database
+  was reset and its revisions went backwards, delete those two files and restart.
+- Each fleet gets the interface `wgf` + the first 8 hex digits of sha256(fleet name), since
+  these names can be up to 32 characters.
+- A fleet's subnet and port never change once it has an interface; a later file that moves
+  them is logged and ignored. Fleets whose name, port or subnet collide with another fleet
+  are ignored.
+- A fleet that leaves the file or passes its `valid_until` stops accepting registrations at
+  once. Its interface stays up until its clients are pruned and `removed_fleet_grace` has
+  passed, and is then removed along with its config file.
 
 ### Duration Format
 
@@ -116,7 +159,8 @@ sudo chmod 755 /var/lib/wg-fleet
 
 On first startup, wg-fleet will:
 1. Generate server keypairs for each fleet (if config doesn't exist)
-2. Create `/etc/wireguard/wg_<fleetname>.conf` files
+2. Create `/etc/wireguard/wg_<fleetname>.conf` files (`wgf<hash>.conf` for fleets from
+   `fleets_url`)
 3. Bring up the WireGuard interfaces
 
 These configs persist across restarts. If you need to regenerate, remove the config files and restart wg-fleet.
@@ -178,8 +222,10 @@ sudo journalctl -u wg-fleet -f
 - Application: `/opt/wg-fleet/`
 - Configuration: `/etc/wg-fleet.yaml`
 - Database: `/var/lib/wg-fleet/clients.db`
-- WireGuard configs: `/etc/wireguard/wg_<fleet>.conf`
+- WireGuard configs: `/etc/wireguard/wg_<fleet>.conf`, `/etc/wireguard/wgf<hash>.conf`
+- Last accepted fleets.json: `/var/lib/wg-fleet/fleets.json` and `fleets.json.sig`
 - Hosts file: `/run/wg_fleet_hosts`
+- Served fleets, for the management server's host-side script: `/run/wg_fleets.json`
 
 ## API Endpoints
 
@@ -381,12 +427,19 @@ from . import my_hook
 - `EventType.CLIENT_ADDED`: New client registered (currently not fired: a new client has no hostname yet, so the existing hooks' output wouldn't change)
 - `EventType.CLIENT_HOSTNAME_CHANGED`: Client hostname updated
 - `EventType.CLIENT_REMOVED`: Client pruned or removed
+- `EventType.FLEETS_CHANGED`: The served fleets changed (a new fleets.json, or a fleet
+  expired or was torn down)
 
 ### Existing Hooks
 
 - `hooks/hosts_file.py`: Generates `/run/wg_fleet_hosts` for hostname resolution
 - `hooks/prometheus_sd.py`: Generates `/run/prometheus_targets.json` (Prometheus file-based service discovery, node_exporter on port 9100)
 - `hooks/ansible_inventory.py`: Generates `/run/ansible_inventory.yml` with one group per fleet
+- `hooks/fleets_file.py`: Generates `/run/wg_fleets.json` on startup and `FLEETS_CHANGED`: the
+  fleets served (not removed ones) with their interface, port, subnet, `node` and
+  `admin_principals` (`["node:*"]` for static fleets), plus the user CA keys from fleets.json.
+  wg-fleet runs in a container, so creating users, repos, units and firewall rules is left to
+  a script on the host run by a systemd `.path` unit on this file.
 
 ### Hook Behavior
 
@@ -442,7 +495,7 @@ pytest --cov=. --cov-report=html
 ### Test Structure
 
 The test suite includes:
-- **Unit tests**: `test_config.py`, `test_database.py`, `test_command.py`, `test_wireguard.py`, `test_hook_manager.py`, `test_hooks.py`, `test_pruning.py`, `test_main.py`
+- **Unit tests**: `test_config.py`, `test_database.py`, `test_command.py`, `test_wireguard.py`, `test_hook_manager.py`, `test_hooks.py`, `test_pruning.py`, `test_main.py`, `test_fleet_source.py`, `test_fleet_registry.py`
 - **API tests**: `test_routes.py`
 - **Integration tests**: `test_integration.py`
 

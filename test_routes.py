@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from routes import create_app
+from config import FleetConfig
 from models import Base, Client as DBClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -23,11 +24,12 @@ def test_app():
     config.domain = "test.internal"
     config.prune_timeout = "30m"
     config.fleets = {
-        'testfleet': MagicMock(
+        'testfleet': FleetConfig(
             ip6='fd00::1',
             subnet='fd00::/64',
             external_ip='1.2.3.4',
-            port=51820
+            port=51820,
+            interface='wg_testfleet'
         )
     }
 
@@ -91,8 +93,8 @@ def test_register_removes_peer_when_db_save_fails(mock_allocate_ip, mock_wg, tes
         response = test_client.post('/fleet/testfleet/register')
 
     assert response.status_code == 500
-    mock_wg.add_peer.assert_called_once_with('testfleet', 'client_pub', 'fd00::1234')
-    mock_wg.remove_peer.assert_called_once_with('testfleet', 'client_pub')
+    mock_wg.add_peer.assert_called_once_with('wg_testfleet', 'client_pub', 'fd00::1234')
+    mock_wg.remove_peer.assert_called_once_with('wg_testfleet', 'client_pub')
     with session_factory() as session:
         assert session.query(DBClient).count() == 0
 

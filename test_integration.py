@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from routes import create_app
+from config import FleetConfig
 from models import Base, Client
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -23,11 +24,12 @@ def integration_app():
     config.domain = "test.internal"
     config.prune_timeout = "30m"
     config.fleets = {
-        'testfleet': MagicMock(
+        'testfleet': FleetConfig(
             ip6='fd00::1',
             subnet='fd00::/64',
             external_ip='1.2.3.4',
-            port=51820
+            port=51820,
+            interface='wg_testfleet'
         )
     }
 

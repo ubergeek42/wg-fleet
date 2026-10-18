@@ -79,6 +79,8 @@ async def register_client(
         raise HTTPException(status_code=404, detail=f"Fleet '{fleet_name}' not found")
 
     fleet_config = app_config.fleets[fleet_name]
+    if fleet_config.removed:
+        raise HTTPException(status_code=403, detail=f"Fleet '{fleet_name}' no longer accepts registrations")
     peer_added = False
 
     try:
@@ -89,7 +91,7 @@ async def register_client(
         client_ip = allocate_random_ip(fleet_config.subnet)
 
         # Build client config
-        server_pubkey = wireguard.get_server_public_key(fleet_name)
+        server_pubkey = wireguard.get_server_public_key(fleet_config.interface)
         config_text = wireguard.build_client_config(
             client_private_key=client_private,
             client_ip=client_ip,
@@ -101,7 +103,7 @@ async def register_client(
         )
 
         # Add peer to WireGuard
-        wireguard.add_peer(fleet_name, client_public, client_ip)
+        wireguard.add_peer(fleet_config.interface, client_public, client_ip)
         peer_added = True
 
         # Save to database
@@ -131,7 +133,7 @@ async def register_client(
         if peer_added:
             # Don't leave a WireGuard peer behind for a client that never got its config
             try:
-                wireguard.remove_peer(fleet_name, client_public)
+                wireguard.remove_peer(fleet_config.interface, client_public)
             except Exception as cleanup_error:
                 logger.error(f"Failed to remove peer after registration failure: {cleanup_error}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -329,7 +331,7 @@ async def fleet_detail(
 
     # Optionally merge WireGuard stats
     try:
-        wg_peers = wireguard.list_peers(fleet_name)
+        wg_peers = wireguard.list_peers(fleet_config.interface)
         wg_map = {peer['public_key']: peer for peer in wg_peers}
 
         for client in clients:

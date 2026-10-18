@@ -29,3 +29,29 @@ class Client(Base):
 
     def __repr__(self):
         return f"<Client(fleet={self.fleet_id}, ip={self.assigned_ip}, hostname={self.hostname})>"
+
+class KnownFleet(Base):
+    """
+    A fleet from fleets_url that has an interface on this server.
+
+    Remembers the addresses each fleet first got, so a later fleets.json can never
+    move them (machines keep their configs), and when the fleet left fleets.json, so
+    its interface can be torn down once its clients are gone.
+
+    Attributes:
+        name: Fleet name
+        ip6: Server address in the fleet
+        subnet: Fleet subnet
+        port: WireGuard port
+        removed_at: When the fleet left fleets.json or expired; None while it's served
+    """
+    __tablename__ = 'known_fleets'
+
+    name = Column(String, primary_key=True)
+    ip6 = Column(String, nullable=False)
+    subnet = Column(String, nullable=False)
+    port = Column(Integer, nullable=False)
+    removed_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<KnownFleet(name={self.name}, subnet={self.subnet}, port={self.port})>"

@@ -28,10 +28,10 @@ def prune_stale_clients_once(config, session_factory) -> int:
     prune_count = 0
     cutoff = datetime.now(UTC) - parse_duration(config.prune_timeout)
 
-    for fleet_name in config.fleets:
+    for fleet_name, fleet_config in config.fleets.items():
         try:
             # Get WireGuard peers with handshake times
-            wg_peers = wireguard.list_peers(fleet_name)
+            wg_peers = wireguard.list_peers(fleet_config.interface)
         except Exception as e:
             logger.error(f"Error listing peers for fleet {fleet_name}: {e}", exc_info=True)
             continue
@@ -61,7 +61,7 @@ def prune_stale_clients_once(config, session_factory) -> int:
 
                 # Commit per client so one failure doesn't roll back the others
                 try:
-                    wireguard.remove_peer(fleet_name, peer['public_key'])
+                    wireguard.remove_peer(fleet_config.interface, peer['public_key'])
                     if client:
                         session.delete(client)
                         session.commit()

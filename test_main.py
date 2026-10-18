@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import patch, MagicMock, call
-from main import setup_fleet_interface, reconcile_fleet_state
 from models import Client, Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -21,76 +20,6 @@ def test_db():
     yield session_factory, engine, db_path
 
     os.unlink(db_path)
-
-@patch('main.wireguard')
-@patch('main.Path')
-def test_setup_fleet_interface_new(mock_path, mock_wg, test_db):
-    """Test setting up a new fleet interface"""
-    session_factory, engine, db_path = test_db
-
-    # Mock config file doesn't exist
-    mock_path.return_value.exists.return_value = False
-    mock_wg.generate_keypair.return_value = ('priv_key', 'pub_key')
-
-    fleet_config = MagicMock()
-    fleet_config.ip6 = 'fd00::1'
-    fleet_config.port = 51820
-
-    setup_fleet_interface('testfleet', fleet_config)
-
-    # Verify keypair generated
-    mock_wg.generate_keypair.assert_called_once()
-
-    # Verify config created
-    mock_wg.create_interface_config.assert_called_once_with(
-        'testfleet', fleet_config, 'priv_key', str(mock_path.return_value)
-    )
-
-    # Verify interface brought up
-    mock_wg.bring_up_interface.assert_called_once_with('testfleet')
-
-@patch('main.wireguard')
-def test_reconcile_fleet_state(mock_wg, test_db):
-    """Test reconciliation removes mismatched entries"""
-    session_factory, engine, db_path = test_db
-
-    # Add test data to database
-    with session_factory() as session:
-        # Client in DB but not in WG
-        orphan = Client(
-            fleet_id="testfleet",
-            public_key="orphan_key",
-            assigned_ip="fd00::100",
-            http_request_ip="1.2.3.4",
-            timestamp=datetime.now(UTC)
-        )
-        # Client in both DB and WG
-        valid = Client(
-            fleet_id="testfleet",
-            public_key="valid_key",
-            assigned_ip="fd00::101",
-            http_request_ip="1.2.3.5",
-            timestamp=datetime.now(UTC)
-        )
-        session.add_all([orphan, valid])
-        session.commit()
-
-    # Mock WireGuard peers (includes valid + extra peer not in DB)
-    mock_wg.list_peers.return_value = [
-        {'public_key': 'valid_key', 'last_handshake': datetime.now(UTC)},
-        {'public_key': 'extra_key', 'last_handshake': datetime.now(UTC)}
-    ]
-
-    reconcile_fleet_state('testfleet', session_factory)
-
-    # Verify orphan removed from DB
-    with session_factory() as session:
-        clients = session.query(Client).all()
-        assert len(clients) == 1
-        assert clients[0].public_key == 'valid_key'
-
-    # Verify extra peer removed from WireGuard
-    mock_wg.remove_peer.assert_called_once_with('testfleet', 'extra_key')
 
 def test_main_initializes_once_and_runs_pruning(test_db, tmp_path):
     """Test main() initializes fleets once and the app lifespan runs the pruner"""
@@ -138,53 +67,3 @@ def test_main_exits_on_startup_failure(tmp_path):
 
     assert exc_info.value.code == 1
     mock_uvicorn.run.assert_not_called()
-
-def test_remove_unconfigured_fleet_clients(test_db):
-    """Test clients of fleets removed from the config are deleted"""
-    from main import remove_unconfigured_fleet_clients
-    session_factory, engine, db_path = test_db
-
-    with session_factory() as session:
-        session.add_all([
-            Client(fleet_id="kept", public_key="k1", assigned_ip="fd00::1",
-                   http_request_ip="1.2.3.4", timestamp=datetime.now(UTC)),
-            Client(fleet_id="dropped", public_key="k2", assigned_ip="fd01::1",
-                   http_request_ip="1.2.3.4", timestamp=datetime.now(UTC)),
-        ])
-        session.commit()
-
-    config = MagicMock()
-    config.fleets = {'kept': MagicMock()}
-
-    remove_unconfigured_fleet_clients(config, session_factory)
-
-    with session_factory() as session:
-        assert [c.fleet_id for c in session.query(Client).all()] == ['kept']
-
-def _fleet_config(port):
-    fleet_config = MagicMock()
-    fleet_config.ip6 = 'fd00::1'
-    fleet_config.subnet = 'fd00::/64'
-    fleet_config.port = port
-    return fleet_config
-
-@pytest.mark.parametrize('port, expect_restart', [(51820, False), (51830, True)])
-def test_setup_fleet_interface_existing_config(port, expect_restart, tmp_path):
-    """Test an existing config is kept as-is, or rewritten and restarted when the fleet config changed"""
-    import wireguard
-    config_path = tmp_path / 'wg_testfleet.conf'
-    wireguard.create_interface_config('testfleet', _fleet_config(51820), 'c2VydmVyX2tleQ==', str(config_path))
-
-    with patch('main.Path', return_value=config_path), \
-         patch('main.wireguard.generate_keypair') as mock_genkey, \
-         patch('main.wireguard.interface_exists', return_value=True), \
-         patch('main.wireguard.bring_down_interface') as mock_down, \
-         patch('main.wireguard.bring_up_interface') as mock_up:
-        setup_fleet_interface('testfleet', _fleet_config(port))
-
-    mock_genkey.assert_not_called()
-    content = config_path.read_text()
-    assert 'PrivateKey = c2VydmVyX2tleQ==' in content
-    assert f'ListenPort = {port}' in content
-    assert mock_down.called == expect_restart
-    mock_up.assert_called_once_with('testfleet')

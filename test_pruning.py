@@ -63,7 +63,7 @@ def test_prune_stale_clients(mock_wg, mock_trigger, test_db_with_stale_clients):
     # Mock config
     config = MagicMock()
     config.prune_timeout = "1h"
-    config.fleets = {'testfleet': MagicMock()}
+    config.fleets = {'testfleet': MagicMock(interface='wg_testfleet')}
 
     # Run pruning
     pruned_count = prune_stale_clients_once(config, session_factory)
@@ -71,7 +71,7 @@ def test_prune_stale_clients(mock_wg, mock_trigger, test_db_with_stale_clients):
     assert pruned_count == 1
 
     # Verify stale client removed from WireGuard
-    mock_wg.remove_peer.assert_called_once_with('testfleet', 'stale_key')
+    mock_wg.remove_peer.assert_called_once_with('wg_testfleet', 'stale_key')
 
     # Verify stale client removed from database
     with session_factory() as session:
@@ -114,7 +114,7 @@ def test_prune_never_connected_stale_clients(mock_wg, mock_trigger, test_db_with
     # Mock config with 1 hour timeout
     config = MagicMock()
     config.prune_timeout = "1h"
-    config.fleets = {'testfleet': MagicMock()}
+    config.fleets = {'testfleet': MagicMock(interface='wg_testfleet')}
 
     # Run pruning
     pruned_count = prune_stale_clients_once(config, session_factory)
@@ -123,7 +123,7 @@ def test_prune_never_connected_stale_clients(mock_wg, mock_trigger, test_db_with
     assert pruned_count == 1
 
     # Verify never-connected client removed from WireGuard
-    mock_wg.remove_peer.assert_called_once_with('testfleet', 'never_connected_key')
+    mock_wg.remove_peer.assert_called_once_with('wg_testfleet', 'never_connected_key')
 
     # Verify only active clients remain in database
     with session_factory() as session:
@@ -161,7 +161,7 @@ def test_prune_failure_does_not_roll_back_other_clients(mock_wg, mock_trigger, t
 
     config = MagicMock()
     config.prune_timeout = "1h"
-    config.fleets = {'testfleet': MagicMock()}
+    config.fleets = {'testfleet': MagicMock(interface='wg_testfleet')}
 
     assert prune_stale_clients_once(config, session_factory) == 1
 
@@ -189,7 +189,7 @@ def test_prune_removes_stale_records_without_peer(mock_wg, mock_trigger, test_db
 
     config = MagicMock()
     config.prune_timeout = "1h"
-    config.fleets = {'testfleet': MagicMock()}
+    config.fleets = {'testfleet': MagicMock(interface='wg_testfleet')}
 
     assert prune_stale_clients_once(config, session_factory) == 1
     mock_wg.remove_peer.assert_not_called()

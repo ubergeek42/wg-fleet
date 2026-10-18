@@ -17,6 +17,7 @@ class EventType(Enum):
     CLIENT_ADDED = "client.added"
     CLIENT_HOSTNAME_CHANGED = "client.hostname_changed"
     CLIENT_REMOVED = "client.removed"
+    FLEETS_CHANGED = "fleets.changed"
 
 
 @dataclass

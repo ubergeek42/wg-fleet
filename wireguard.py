@@ -61,7 +61,7 @@ def read_private_key(config_path: str) -> str:
     raise ValueError(f"No PrivateKey in {config_path}")
 
 def create_interface_config(
-    fleet_name: str,
+    interface: str,
     fleet_config: Dict,
     private_key: str,
     config_path: str = None
@@ -70,13 +70,13 @@ def create_interface_config(
     Write WireGuard interface configuration file.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
         fleet_config: Fleet configuration dict with ip6, port
         private_key: Server's private key
-        config_path: Optional custom path (defaults to /etc/wireguard/wg_<fleet>.conf)
+        config_path: Optional custom path (defaults to /etc/wireguard/<interface>.conf)
     """
     if config_path is None:
-        config_path = f'/etc/wireguard/wg_{fleet_name}.conf'
+        config_path = f'/etc/wireguard/{interface}.conf'
 
     config_content = render_interface_config(fleet_config, private_key)
 
@@ -87,89 +87,89 @@ def create_interface_config(
         f.write(config_content)
     logger.info(f"Created WireGuard config: {config_path}")
 
-def interface_exists(fleet_name: str) -> bool:
+def interface_exists(interface: str) -> bool:
     """
     Check if WireGuard interface exists.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
 
     Returns:
         True if interface exists, False otherwise
     """
     try:
-        run_command(['wg', 'show', f'wg_{fleet_name}'])
+        run_command(['wg', 'show', interface])
         return True
     except CommandError:
         return False
 
-def bring_up_interface(fleet_name: str) -> None:
+def bring_up_interface(interface: str) -> None:
     """
     Bring up WireGuard interface.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
     """
     # Check if interface is already up
-    if interface_exists(fleet_name):
-        logger.info(f"Interface wg_{fleet_name} already exists, skipping bring up")
+    if interface_exists(interface):
+        logger.info(f"Interface {interface} already exists, skipping bring up")
         return
 
-    run_command(['wg-quick', 'up', f'wg_{fleet_name}'])
-    logger.info(f"Brought up interface: wg_{fleet_name}")
+    run_command(['wg-quick', 'up', interface])
+    logger.info(f"Brought up interface: {interface}")
 
-def bring_down_interface(fleet_name: str) -> None:
+def bring_down_interface(interface: str) -> None:
     """
     Shutdown WireGuard interface.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
     """
-    run_command(['wg-quick', 'down', f'wg_{fleet_name}'])
-    logger.info(f"Brought down interface: wg_{fleet_name}")
+    run_command(['wg-quick', 'down', interface])
+    logger.info(f"Brought down interface: {interface}")
 
-def add_peer(fleet_name: str, public_key: str, allowed_ip: str) -> None:
+def add_peer(interface: str, public_key: str, allowed_ip: str) -> None:
     """
     Add peer to WireGuard interface.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
         public_key: Peer's public key
         allowed_ip: IPv6 address for peer
     """
     run_command([
-        'wg', 'set', f'wg_{fleet_name}',
+        'wg', 'set', interface,
         'peer', public_key,
         'allowed-ips', allowed_ip
     ])
-    logger.info(f"Added peer to wg_{fleet_name}: {allowed_ip}")
+    logger.info(f"Added peer to {interface}: {allowed_ip}")
 
-def remove_peer(fleet_name: str, public_key: str) -> None:
+def remove_peer(interface: str, public_key: str) -> None:
     """
     Remove peer from WireGuard interface.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
         public_key: Peer's public key to remove
     """
     run_command([
-        'wg', 'set', f'wg_{fleet_name}',
+        'wg', 'set', interface,
         'peer', public_key,
         'remove'
     ])
-    logger.info(f"Removed peer from wg_{fleet_name}")
+    logger.info(f"Removed peer from {interface}")
 
-def list_peers(fleet_name: str) -> List[Dict]:
+def list_peers(interface: str) -> List[Dict]:
     """
     Get all peers with handshake information.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
 
     Returns:
         List of peer dicts with keys: public_key, allowed_ips, last_handshake, etc.
     """
-    output = run_command(['wg', 'show', f'wg_{fleet_name}', 'dump'])
+    output = run_command(['wg', 'show', interface, 'dump'])
 
     peers = []
     for line in output.split('\n')[1:]:  # Skip first line (server interface)
@@ -196,17 +196,17 @@ def list_peers(fleet_name: str) -> List[Dict]:
 
     return peers
 
-def get_server_public_key(fleet_name: str) -> str:
+def get_server_public_key(interface: str) -> str:
     """
     Extract server's public key from interface.
 
     Args:
-        fleet_name: Name of the fleet
+        interface: WireGuard interface name
 
     Returns:
         Server's public key string
     """
-    return run_command(['wg', 'show', f'wg_{fleet_name}', 'public-key'])
+    return run_command(['wg', 'show', interface, 'public-key'])
 
 def build_client_config(
     client_private_key: str,

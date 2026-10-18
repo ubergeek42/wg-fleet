@@ -337,3 +337,77 @@ fleets:
             load_config(config_path)
     finally:
         Path(config_path).unlink()
+
+def write_config(tmp_path, content):
+    path = tmp_path / 'config.yaml'
+    path.write_text(content)
+    return str(path)
+
+URL_CONFIG = """
+domain: test.internal
+prune_timeout: 30m
+fleets_url: https://bucket.example.org/v2/fleets.json
+server_name: mgmt.example.org
+external_ip: 203.0.113.5
+config_signers:
+  - contestforge ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample
+"""
+
+def test_fleets_url_without_static_fleets(tmp_path):
+    """Test a config with only fleets_url is valid, and its settings default sensibly"""
+    config = load_config(write_config(tmp_path, URL_CONFIG))
+
+    assert config.fleets == {} and config.static_fleets == {}
+    assert config.fleets_url == 'https://bucket.example.org/v2/fleets.json'
+    assert config.config_signers == ['contestforge ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample']
+    assert config.config_signer_id == 'contestforge'
+    assert config.server_name == 'mgmt.example.org'
+    assert config.refresh_interval == '1m'
+    assert config.removed_fleet_grace == '24h'
+
+def test_config_signers_as_block_string(tmp_path):
+    """Test allowed_signers lines can be given as one block, as they're usually pasted"""
+    config = load_config(write_config(tmp_path, URL_CONFIG.replace(
+        "config_signers:\n  - contestforge ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample\n",
+        "config_signers: |\n  contestforge ssh-ed25519 AAAA1\n  contestforge ssh-ed25519 AAAA2\n")))
+
+    assert config.config_signers == ['contestforge ssh-ed25519 AAAA1', 'contestforge ssh-ed25519 AAAA2']
+
+@pytest.mark.parametrize('key', ['server_name', 'external_ip', 'config_signers'])
+def test_fleets_url_requires(key, tmp_path):
+    """Test fleets_url can't be used without knowing whose fleets are ours and who signs them"""
+    content = '\n'.join(line for line in URL_CONFIG.splitlines()
+                        if not line.startswith(key) and not (key == 'config_signers' and line.startswith('  -')))
+    with pytest.raises(ValueError, match=key):
+        load_config(write_config(tmp_path, content))
+
+def test_no_fleets_at_all(tmp_path):
+    """Test a config with neither static fleets nor fleets_url is rejected"""
+    with pytest.raises(ValueError, match="No fleets configured"):
+        load_config(write_config(tmp_path, "domain: x\nprune_timeout: 30m\n"))
+
+def test_static_fleet_uses_server_external_ip(tmp_path):
+    """Test a static fleet without external_ip takes the server-level one"""
+    config = load_config(write_config(tmp_path, URL_CONFIG + """
+fleets:
+  setup:
+    ip6: "fd00::1"
+    subnet: "fd00::/64"
+    port: 51920
+"""))
+    assert config.fleets['setup'].external_ip == '203.0.113.5'
+    assert config.fleets['setup'].interface == 'wg_setup'
+    assert config.fleets['setup'].static is True
+
+@pytest.mark.parametrize('line, error', [
+    ('refresh_interval: 30s', 'refresh_interval'),
+    ('removed_fleet_grace: 1d', 'removed_fleet_grace'),
+    ('register_rate_limit: 0', 'register_rate_limit'),
+    ('fleets_url: ftp://example.org/fleets.json', 'fleets_url'),
+])
+def test_invalid_server_settings(line, error, tmp_path):
+    """Test bad values for the new server-level settings are rejected at load"""
+    key = line.split(':')[0]
+    content = '\n'.join(l for l in URL_CONFIG.splitlines() if not l.startswith(key + ':')) + '\n' + line + '\n'
+    with pytest.raises(ValueError, match=error):
+        load_config(write_config(tmp_path, content))

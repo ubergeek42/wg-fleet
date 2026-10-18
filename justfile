@@ -62,7 +62,7 @@ clean:
 # Show WireGuard interface status for all fleets
 wg-status: check-root
     @echo "=== WireGuard Interface Status ==="
-    @for iface in /etc/wireguard/wg_*.conf; do \
+    @for iface in /etc/wireguard/wg*.conf; do \
         if [ -f "$iface" ]; then \
             name=$(basename "$iface" .conf); \
             echo ""; \
@@ -74,7 +74,7 @@ wg-status: check-root
 # Bring down all fleet interfaces
 wg-down: check-root
     @echo "Bringing down all fleet interfaces..."
-    @for iface in /etc/wireguard/wg_*.conf; do \
+    @for iface in /etc/wireguard/wg*.conf; do \
         if [ -f "$iface" ]; then \
             name=$(basename "$iface" .conf); \
             echo "Stopping $name..."; \

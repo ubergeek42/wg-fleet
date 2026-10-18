@@ -28,7 +28,7 @@ def test_generate_keypair(mock_run_command):
 @patch('wireguard.run_command')
 def test_add_peer(mock_run_command):
     """Test adding a peer to WireGuard interface"""
-    add_peer('testfleet', 'pubkey123', 'fd00::100')
+    add_peer('wg_testfleet', 'pubkey123', 'fd00::100')
 
     mock_run_command.assert_called_once_with([
         'wg', 'set', 'wg_testfleet',
@@ -39,7 +39,7 @@ def test_add_peer(mock_run_command):
 @patch('wireguard.run_command')
 def test_remove_peer(mock_run_command):
     """Test removing a peer from WireGuard interface"""
-    remove_peer('testfleet', 'pubkey123')
+    remove_peer('wg_testfleet', 'pubkey123')
 
     mock_run_command.assert_called_once_with([
         'wg', 'set', 'wg_testfleet',
