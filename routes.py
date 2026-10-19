@@ -96,7 +96,13 @@ async def register_client(
         raise HTTPException(status_code=403, detail=f"Fleet '{fleet_name}' no longer accepts registrations")
 
     site = host_key = None
-    if not fleet_config.static:
+    if fleet_config.static:
+        # Unauthenticated, so never used for a certificate or to take over a record here.
+        # Kept so that when the machine later joins a fleet from fleets_url with its
+        # token, this record can be removed (see `moved` below).
+        if body is not None and body.host_key:
+            host_key = normalize_host_key(body.host_key)
+    else:
         body = body or RegisterRequest()
         if not body.site or not body.token or not token_matches(
                 body.token, fleet_config.sites.get(body.site)):
@@ -112,10 +118,18 @@ async def register_client(
     # takes over its previous record's hostname, instead of getting "name--2" until the
     # old record is pruned. Only the same host key at the same site can do that.
     previous = []
-    if host_key is not None:
+    # A machine that moved here from another fleet (e.g. from the setup fleet after
+    # setup, or to another contest) is removed from that fleet right away, rather than
+    # lingering in the hosts file, inventory and Prometheus until it's pruned. Only a
+    # token-checked registration can do that, never an unauthenticated static one.
+    moved = []
+    if not fleet_config.static:
         previous = db.query(Client).filter_by(
             fleet_id=fleet_name, site=site, host_key=host_key
         ).order_by(Client.timestamp.desc()).all()
+        moved = db.query(Client).filter(
+            Client.fleet_id != fleet_name, Client.host_key == host_key
+        ).all()
     reclaimed = previous[0] if previous else None
 
     peer_added = False
@@ -159,8 +173,9 @@ async def register_client(
             client_record.host_certificate = reclaimed.host_certificate
             client_record.host_certificate_name = reclaimed.host_certificate_name
             client_record.host_certificate_valid_until = reclaimed.host_certificate_valid_until
-        old_peers = [old.public_key for old in previous]
-        for old in previous:
+        old_peers = [(old.fleet_id, old.public_key) for old in previous + moved]
+        moved_from = [(old.fleet_id, old.hostname or old.assigned_ip) for old in moved]
+        for old in previous + moved:
             db.delete(old)
         db.add(client_record)
         db.commit()
@@ -168,16 +183,23 @@ async def register_client(
         logger.info(f"Client registered: fleet={fleet_name}, site={site}, ip={client_ip}, "
                     f"source={request.client.host}")
 
-        if previous:
-            for old_peer in old_peers:
+        if old_peers:
+            for old_fleet, old_peer in old_peers:
+                old_fleet_config = app_config.fleets.get(old_fleet)
+                if old_fleet_config is None:
+                    continue
                 try:
-                    wireguard.remove_peer(fleet_config.interface, old_peer)
+                    wireguard.remove_peer(old_fleet_config.interface, old_peer)
                 except Exception as e:
-                    # Pruning removes it later
+                    # Reconciliation removes it on the next start
                     logger.error(f"Failed to remove the previous peer of a re-registered client: {e}")
-            logger.info(f"Client re-registered: fleet={fleet_name}, ip={client_ip}, "
-                        f"hostname={client_record.hostname} (replaces {len(previous)} record(s))")
-            # The name now points at the new address
+            if previous:
+                logger.info(f"Client re-registered: fleet={fleet_name}, ip={client_ip}, "
+                            f"hostname={client_record.hostname} (replaces {len(previous)} record(s))")
+            for old_fleet, old_name in moved_from:
+                logger.info(f"Client moved: from fleet={old_fleet} ({old_name}) "
+                            f"to fleet={fleet_name}, ip={client_ip}")
+            # Names now point at the new address, or are gone
             trigger_hooks(HookContext(
                 event_type=EventType.CLIENT_ADDED,
                 config=app_config,

@@ -320,15 +320,17 @@ def test_register_refuses_removed_fleet(url_fleet, mock_wg, host_key):
     assert response.status_code == 403
 
 def test_static_fleet_ignores_enrollment_fields(test_app, mock_wg, host_key):
-    """Test static fleets register anyone and don't store an unauthenticated site or host key"""
+    """Test static fleets register anyone, store no site, and keep the host key only for matching"""
     test_client, config, session_factory = test_app
 
     response = register(test_client, fleet='testfleet', site=SITE, token='anything', host_key=host_key[1])
+    assert register(test_client, fleet='testfleet', host_key='not a key').status_code == 200
 
     assert response.status_code == 200
     with session_factory() as session:
-        client = session.query(DBClient).one()
-        assert (client.site, client.host_key) == (None, None)
+        clients = session.query(DBClient).order_by(DBClient.id).all()
+        assert [(c.site, c.host_key) for c in clients] == [
+            (None, ' '.join(host_key[1].split()[:2])), (None, None)]
 
 def test_token_matches():
     """Test tokens are compared by their sha256"""
@@ -478,4 +480,60 @@ def test_other_host_key_cant_reclaim_hostname(url_fleet, mock_wg, host_key, tmp_
 
     assert hostname_of(session_factory, first_ip) == 't101'
     assert hostname_of(session_factory, other_ip) == 't101--2'
+    mock_wg.remove_peer.assert_not_called()
+
+# Moving between fleets (plan X1.3)
+
+def clients_by_fleet(session_factory):
+    with session_factory() as session:
+        return sorted((c.fleet_id, c.assigned_ip) for c in session.query(DBClient).all())
+
+def test_moving_from_static_fleet_removes_old_record(url_fleet, mock_wg, host_key):
+    """Test a machine that joins its contest's fleet after setup leaves the setup fleet at once"""
+    test_client, config, session_factory = url_fleet
+    with patch('routes.allocate_random_ip', return_value='fd00::77'):
+        register(test_client, fleet='testfleet', host_key=host_key[1])
+    ping(test_client, 'fd00::77', 'icpc-abc123')
+    mock_wg.generate_keypair.return_value = ('new_priv', 'new_pub')
+
+    with patch('routes.trigger_hooks') as mock_hooks:
+        new_ip = enroll(test_client, host_key[1])
+
+    assert clients_by_fleet(session_factory) == [('bs26-ma', new_ip)]
+    mock_wg.remove_peer.assert_called_once_with('wg_testfleet', 'client_pub')
+    mock_hooks.assert_called_once()
+    # It doesn't take the setup fleet's name with it
+    with session_factory() as session:
+        assert session.query(DBClient).one().hostname is None
+
+def test_moving_between_contest_fleets(url_fleet, mock_wg, host_key):
+    """Test re-running setup for another contest moves the machine out of the first contest's fleet"""
+    test_client, config, session_factory = url_fleet
+    other_site, other_token = 'BigSouth2026/SouthEast/Clemson', 'c2Vjb25kLXRva2Vu'
+    config.fleets['bs26-se'] = FleetConfig(
+        ip6='fd02::1', subnet='fd02::/64', external_ip='1.2.3.4', port=51831,
+        interface='wgf87654321', static=False, node='BigSouth2026/SouthEast',
+        valid_until=datetime.now(UTC) + timedelta(days=30),
+        sites={other_site: hashlib.sha256(other_token.encode()).hexdigest()},
+    )
+    old_ip = enroll(test_client, host_key[1])
+    mock_wg.generate_keypair.return_value = ('new_priv', 'new_pub')
+
+    with patch('routes.allocate_random_ip', return_value='fd02::55'):
+        response = register(test_client, fleet='bs26-se', site=other_site, token=other_token,
+                            host_key=host_key[1])
+
+    assert response.status_code == 200
+    assert clients_by_fleet(session_factory) == [('bs26-se', 'fd02::55')]
+    mock_wg.remove_peer.assert_called_once_with('wgf12345678', 'client_pub')
+
+def test_static_registration_never_evicts(url_fleet, mock_wg, host_key):
+    """Test an unauthenticated registration with a machine's host key can't remove that machine"""
+    test_client, config, session_factory = url_fleet
+    contest_ip = enroll(test_client, host_key[1])
+
+    with patch('routes.allocate_random_ip', return_value='fd00::99'):
+        assert register(test_client, fleet='testfleet', host_key=host_key[1]).status_code == 200
+
+    assert clients_by_fleet(session_factory) == [('bs26-ma', contest_ip), ('testfleet', 'fd00::99')]
     mock_wg.remove_peer.assert_not_called()

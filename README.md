@@ -246,8 +246,9 @@ sudo journalctl -u wg-fleet -f
 ```
 
 The token's sha256 must match the site's `token_sha256` in fleets.json; an unknown site or
-a wrong token gets 403, and a missing or malformed `host_key` 400. Static fleets ignore these
-fields and store neither. A removed or expired fleet refuses every registration (403).
+a wrong token gets 403, and a missing or malformed `host_key` 400. Static fleets don't check
+these fields or store `site`; a valid `host_key` is stored only so a later move can be
+matched (see Re-registration). A removed or expired fleet refuses every registration (403).
 
 **Response:**
 ```json
@@ -330,6 +331,12 @@ A client of a fleet from `fleets_url` that registers again with the same site an
 (a new WireGuard key after a reboot or VPN failure) takes over its previous record's hostname
 and certificate; the previous record and peer are removed at once instead of waiting to be
 pruned. A different host key never takes another machine's name.
+
+The same registration also removes any record with that host key in *other* fleets, so a
+machine that moves (from the setup fleet after setup, or to another contest's fleet) leaves
+the old fleet's hosts file, inventory and Prometheus targets at once instead of after
+`prune_timeout`. Only token-checked registrations do this: registering in a static fleet
+never removes anything.
 
 ### Admin Dashboard
 
