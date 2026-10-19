@@ -493,3 +493,19 @@ def test_expired_fleet_keeps_existing_peers(test_db, mock_setup):
     assert config.fleets['f'].removed is True
     with test_db() as session:
         assert session.query(Client).count() == 1
+
+
+def test_removed_static_fleet_interface_is_brought_down(wireguard_dir):
+    """Test a static fleet dropped from the config loses its interface at startup, but keeps its key"""
+    from fleet_registry import stop_unconfigured_static_interfaces
+    config = make_config()
+    for name in ('wg_setup', 'wg_southeast', 'wgf12345678'):
+        (wireguard_dir / f'{name}.conf').write_text('[Interface]\n')
+
+    with patch('fleet_registry.wireguard') as mock_wg:
+        mock_wg.interface_exists.return_value = True
+        stop_unconfigured_static_interfaces(config)
+
+    # Only the dropped static fleet; URL fleets' interfaces are the registry's business
+    mock_wg.bring_down_interface.assert_called_once_with('wg_southeast')
+    assert (wireguard_dir / 'wg_southeast.conf').exists()

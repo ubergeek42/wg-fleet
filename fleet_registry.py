@@ -138,6 +138,26 @@ def remove_unconfigured_fleet_clients(fleets: Dict[str, FleetConfig], session_fa
         session.commit()
 
 
+def stop_unconfigured_static_interfaces(config):
+    """
+    Bring down the interfaces of static fleets that were removed from the config.
+
+    Static fleets only change on a restart, so this runs at startup. The config file is
+    kept, so a fleet added back gets the same server key and its machines' configs
+    still work.
+    """
+    for conf in sorted(WIREGUARD_DIR.glob('wg_*.conf')):
+        interface = conf.stem
+        if interface[len('wg_'):] in config.static_fleets:
+            continue
+        try:
+            if wireguard.interface_exists(interface):
+                wireguard.bring_down_interface(interface)
+                logger.info(f"Brought down {interface}: its static fleet is no longer configured")
+        except Exception as e:
+            logger.error(f"Could not bring down {interface}: {e}")
+
+
 def addresses_collide(a: FleetConfig, b: FleetConfig) -> bool:
     """Whether two fleets would share a port or overlapping subnets"""
     return (a.port == b.port
@@ -338,6 +358,7 @@ def initialize_fleets(config, session_factory, source: Optional[FleetSource] = N
         session_factory: SQLAlchemy session factory
         source: fleets.json source, if fleets_url is set
     """
+    stop_unconfigured_static_interfaces(config)
     for fleet_name, fleet_config in config.static_fleets.items():
         setup_fleet_interface(fleet_name, fleet_config)
 

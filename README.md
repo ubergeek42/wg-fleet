@@ -171,6 +171,9 @@ On first startup, wg-fleet will:
 
 These configs persist across restarts. If you need to regenerate, remove the config files and restart wg-fleet.
 
+When a static fleet is removed from the config, its `wg_<name>` interface is brought down
+on the next start. Its config file is kept, so adding the fleet back keeps its server key.
+
 ## Running the Server
 
 ### Development Mode
