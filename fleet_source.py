@@ -45,15 +45,17 @@ class FleetsDocument:
     fleets: Dict[str, FleetConfig] = field(default_factory=dict)
 
 
-def verify_signature(data: bytes, signature: bytes, signers: List[str], signer_id: str) -> bool:
+def verify_signature(data: bytes, signature: bytes, signers: List[str], signer_id: str,
+                     namespace: str = SIGNATURE_NAMESPACE) -> bool:
     """
-    Check a detached `ssh-keygen -Y sign -n contestforge` signature over data.
+    Check a detached `ssh-keygen -Y sign` signature over data.
 
     Args:
-        data: The exact file bytes
-        signature: Contents of the .sig file
+        data: The exact bytes that were signed
+        signature: The armored signature
         signers: allowed_signers lines
         signer_id: Principal the signature must be from
+        namespace: Signature namespace (contestforge for published files)
 
     Returns:
         True if the signature is valid and from an allowed signer
@@ -70,7 +72,7 @@ def verify_signature(data: bytes, signature: bytes, signers: List[str], signer_i
                 'ssh-keygen', '-Y', 'verify',
                 '-f', str(signers_path),
                 '-I', signer_id,
-                '-n', SIGNATURE_NAMESPACE,
+                '-n', namespace,
                 '-s', str(sig_path),
             ], input_data=data, quiet=True)
             return True

@@ -366,10 +366,19 @@ def certificate_info(tmp_path, certificate):
     path.write_text(certificate + '\n')
     return subprocess.run(['ssh-keygen', '-L', '-f', str(path)], capture_output=True, text=True, check=True).stdout
 
-def enroll(test_client, host_key_line, ip='fd01::1234'):
-    """Register to bs26-ma with a valid token, as the machine at ip"""
+def sign_registration(key_path, fleet, site, host_key_line):
+    """host_key_signature as wg_setup makes it: the host key signs fleet, site and host_key"""
+    from enrollment import registration_message
+    key = ' '.join(host_key_line.split()[:2])
+    return subprocess.run(['ssh-keygen', '-q', '-Y', 'sign', '-n', 'wg-fleet-register', '-f', str(key_path), '-'],
+                          input=registration_message(fleet, site, key), capture_output=True,
+                          check=True).stdout.decode()
+
+def enroll(test_client, key, ip='fd01::1234', fleet='bs26-ma', site=SITE, token=TOKEN, signed=True):
+    """Register with a valid token as the machine at ip; key is (private key path, public key line)"""
+    extra = {'host_key_signature': sign_registration(key[0], fleet, site, key[1])} if signed else {}
     with patch('routes.allocate_random_ip', return_value=ip):
-        response = register(test_client, site=SITE, token=TOKEN, host_key=host_key_line)
+        response = register(test_client, fleet=fleet, site=site, token=token, host_key=key[1], **extra)
     assert response.status_code == 200
     return ip
 
@@ -378,7 +387,7 @@ def test_ping_returns_host_certificate(url_fleet, mock_wg, host_key, tmp_path, h
     import host_ca
     test_client, config, session_factory = url_fleet
     host_ca.ensure_host_ca()
-    ip = enroll(test_client, host_key[1])
+    ip = enroll(test_client, host_key)
 
     response = ping(test_client, ip, 't101', fleet='bs26-ma')
 
@@ -402,7 +411,7 @@ def test_host_certificate_reissued_only_on_change(url_fleet, mock_wg, host_key):
     import host_ca
     test_client, config, session_factory = url_fleet
     host_ca.ensure_host_ca()
-    ip = enroll(test_client, host_key[1])
+    ip = enroll(test_client, host_key)
 
     with patch('routes.host_ca.sign_host_key', wraps=host_ca.sign_host_key) as mock_sign:
         first = ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate']
@@ -435,7 +444,7 @@ def test_no_host_certificate(case, url_fleet, mock_wg, host_key):
             register(test_client, fleet='testfleet', host_key=host_key[1])
         response = ping(test_client, 'fd00::77', 't101')
     else:
-        ip = enroll(test_client, host_key[1])
+        ip = enroll(test_client, host_key)
         if case == 'removed':
             config.fleets['bs26-ma'].removed = True
         if case == 'expired':
@@ -450,12 +459,12 @@ def test_reregistration_reclaims_hostname(url_fleet, mock_wg, host_key):
     import host_ca
     test_client, config, session_factory = url_fleet
     host_ca.ensure_host_ca()
-    old_ip = enroll(test_client, host_key[1], ip='fd01::1111')
+    old_ip = enroll(test_client, host_key, ip='fd01::1111')
     ping(test_client, old_ip, 't101', fleet='bs26-ma')
     mock_wg.generate_keypair.return_value = ('new_priv', 'new_pub')
 
     with patch('routes.trigger_hooks') as mock_hooks:
-        new_ip = enroll(test_client, host_key[1], ip='fd01::2222')
+        new_ip = enroll(test_client, host_key, ip='fd01::2222')
 
     with session_factory() as session:
         clients = session.query(DBClient).all()
@@ -471,11 +480,11 @@ def test_other_host_key_cant_reclaim_hostname(url_fleet, mock_wg, host_key, tmp_
     test_client, config, session_factory = url_fleet
     other = tmp_path / 'other_key'
     subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(other)], check=True)
-    first_ip = enroll(test_client, host_key[1], ip='fd01::1111')
+    first_ip = enroll(test_client, host_key, ip='fd01::1111')
     ping(test_client, first_ip, 't101', fleet='bs26-ma')
     mock_wg.generate_keypair.return_value = ('other_priv', 'other_pub')
 
-    other_ip = enroll(test_client, other.with_suffix('.pub').read_text(), ip='fd01::3333')
+    other_ip = enroll(test_client, (other, other.with_suffix('.pub').read_text()), ip='fd01::3333')
     ping(test_client, other_ip, 't101', fleet='bs26-ma')
 
     assert hostname_of(session_factory, first_ip) == 't101'
@@ -497,7 +506,7 @@ def test_moving_from_static_fleet_removes_old_record(url_fleet, mock_wg, host_ke
     mock_wg.generate_keypair.return_value = ('new_priv', 'new_pub')
 
     with patch('routes.trigger_hooks') as mock_hooks:
-        new_ip = enroll(test_client, host_key[1])
+        new_ip = enroll(test_client, host_key)
 
     assert clients_by_fleet(session_factory) == [('bs26-ma', new_ip)]
     mock_wg.remove_peer.assert_called_once_with('wg_testfleet', 'client_pub')
@@ -516,21 +525,18 @@ def test_moving_between_contest_fleets(url_fleet, mock_wg, host_key):
         valid_until=datetime.now(UTC) + timedelta(days=30),
         sites={other_site: hashlib.sha256(other_token.encode()).hexdigest()},
     )
-    old_ip = enroll(test_client, host_key[1])
+    old_ip = enroll(test_client, host_key)
     mock_wg.generate_keypair.return_value = ('new_priv', 'new_pub')
 
-    with patch('routes.allocate_random_ip', return_value='fd02::55'):
-        response = register(test_client, fleet='bs26-se', site=other_site, token=other_token,
-                            host_key=host_key[1])
+    enroll(test_client, host_key, ip='fd02::55', fleet='bs26-se', site=other_site, token=other_token)
 
-    assert response.status_code == 200
     assert clients_by_fleet(session_factory) == [('bs26-se', 'fd02::55')]
     mock_wg.remove_peer.assert_called_once_with('wgf12345678', 'client_pub')
 
 def test_static_registration_never_evicts(url_fleet, mock_wg, host_key):
     """Test an unauthenticated registration with a machine's host key can't remove that machine"""
     test_client, config, session_factory = url_fleet
-    contest_ip = enroll(test_client, host_key[1])
+    contest_ip = enroll(test_client, host_key)
 
     with patch('routes.allocate_random_ip', return_value='fd00::99'):
         assert register(test_client, fleet='testfleet', host_key=host_key[1]).status_code == 200
@@ -543,9 +549,59 @@ def test_no_certificate_after_expiry(url_fleet, mock_wg, host_key):
     import host_ca
     test_client, config, session_factory = url_fleet
     host_ca.ensure_host_ca()
-    ip = enroll(test_client, host_key[1])
+    ip = enroll(test_client, host_key)
     assert ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate']
 
     config.fleets['bs26-ma'].valid_until = datetime.now(UTC) - timedelta(seconds=1)
 
     assert ping(test_client, ip, 't101', fleet='bs26-ma').json() == {'status': 'ok'}
+
+# Proving the host key (W2.5)
+
+def test_forged_host_key_signature_is_refused(url_fleet, mock_wg, host_key, tmp_path):
+    """Test a signature by some other key, or over other fields, is refused"""
+    test_client, config, session_factory = url_fleet
+    impostor = tmp_path / 'impostor'
+    subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(impostor)], check=True)
+
+    forged = sign_registration(impostor, 'bs26-ma', SITE, host_key[1])
+    other_fleet = sign_registration(host_key[0], 'bs26-se', SITE, host_key[1])
+    for signature in (forged, other_fleet, 'garbage'):
+        response = register(test_client, site=SITE, token=TOKEN, host_key=host_key[1],
+                            host_key_signature=signature)
+        assert response.status_code == 403
+    mock_wg.add_peer.assert_not_called()
+
+def test_unsigned_registration_cant_evict(url_fleet, mock_wg, host_key):
+    """Test a token holder who sends another machine's public key without its signature can't
+    take its name or remove it, but still gets in (old clients don't sign yet)"""
+    test_client, config, session_factory = url_fleet
+    victim_ip = enroll(test_client, host_key, ip='fd01::1111')
+    ping(test_client, victim_ip, 't101', fleet='bs26-ma')
+    mock_wg.generate_keypair.return_value = ('attacker_priv', 'attacker_pub')
+
+    attacker_ip = enroll(test_client, host_key, ip='fd01::6666', signed=False)
+    ping(test_client, attacker_ip, 't101', fleet='bs26-ma')
+
+    assert hostname_of(session_factory, victim_ip) == 't101'
+    assert hostname_of(session_factory, attacker_ip) == 't101--2'
+    mock_wg.remove_peer.assert_not_called()
+
+def test_registration_message_format():
+    """Test the signed message is the line format wg_setup builds with printf"""
+    from enrollment import registration_message
+    assert registration_message('bs26-ma', SITE, 'ssh-ed25519 AAAA') == (
+        b'fleet=bs26-ma\nsite=BigSouth2026/MidAtlantic/VirginiaTech\nhost_key=ssh-ed25519 AAAA\n')
+
+def test_shell_signature_verifies(host_key):
+    """Test a signature made with the documented printf | ssh-keygen pipeline verifies"""
+    from enrollment import host_key_signature_valid
+    key = ' '.join(host_key[1].split()[:2])
+    signature = subprocess.run(
+        ['sh', '-c', 'printf "fleet=%s\\nsite=%s\\nhost_key=%s\\n" "$1" "$2" "$3" | '
+                     'ssh-keygen -q -Y sign -n wg-fleet-register -f "$4" -',
+         'sh', 'bs26-ma', SITE, key, str(host_key[0])],
+        capture_output=True, text=True, check=True).stdout
+
+    assert host_key_signature_valid('bs26-ma', SITE, key, signature)
+    assert not host_key_signature_valid('bs26-ma', 'Other/Site', key, signature)

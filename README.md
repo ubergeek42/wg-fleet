@@ -251,9 +251,23 @@ sudo journalctl -u wg-fleet -f
 {
   "site": "BigSouth2026/MidAtlantic/VirginiaTech",
   "token": "<the site's enrollment token>",
-  "host_key": "ssh-ed25519 AAAA..."
+  "host_key": "ssh-ed25519 AAAA...",
+  "host_key_signature": "-----BEGIN SSH SIGNATURE-----\n..."
 }
 ```
+
+`host_key_signature` proves the client owns `host_key`: it's the host key's signature over
+`fleet=<fleet>\nsite=<site>\nhost_key=<type> <base64>\n` (the key without its comment):
+
+```bash
+printf 'fleet=%s\nsite=%s\nhost_key=%s\n' "$FLEET" "$SITE" "$(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)" |
+    ssh-keygen -q -Y sign -n wg-fleet-register -f /etc/ssh/ssh_host_ed25519_key -
+```
+
+A signature that doesn't verify gets 403. Without one, the registration is still accepted
+(for clients that don't sign yet), but it can't take over a previous record's hostname or
+remove the machine from another fleet (see Re-registration), since anyone with the site's
+token could send another machine's public key.
 
 The token's sha256 must match the site's `token_sha256` in fleets.json; an unknown site or
 a wrong token gets 403, and a missing or malformed `host_key` 400. Static fleets don't check
@@ -337,7 +351,8 @@ change.
 
 ### Re-registration
 
-A client of a fleet from `fleets_url` that registers again with the same site and host key
+A client of a fleet from `fleets_url` that registers again with the same site and a proven
+(signed) host key
 (a new WireGuard key after a reboot or VPN failure) takes over its previous record's hostname
 and certificate; the previous record and peer are removed at once instead of waiting to be
 pruned. A different host key never takes another machine's name.
@@ -345,8 +360,8 @@ pruned. A different host key never takes another machine's name.
 The same registration also removes any record with that host key in *other* fleets, so a
 machine that moves (from the setup fleet after setup, or to another contest's fleet) leaves
 the old fleet's hosts file, inventory and Prometheus targets at once instead of after
-`prune_timeout`. Only token-checked registrations do this: registering in a static fleet
-never removes anything.
+`prune_timeout`. Only registrations with a token and a signed host key do this:
+registering in a static fleet never removes anything.
 
 ### Admin Dashboard
 

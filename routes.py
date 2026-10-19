@@ -11,7 +11,7 @@ from datetime import datetime, UTC
 import logging
 
 from models import Client
-from enrollment import normalize_host_key, token_matches
+from enrollment import host_key_signature_valid, normalize_host_key, token_matches
 from fleet_registry import as_utc
 import host_ca
 import wireguard
@@ -37,6 +37,9 @@ class RegisterRequest(BaseModel):
     site: Optional[str] = None
     token: Optional[str] = None
     host_key: Optional[str] = None
+    # host_key's `ssh-keygen -Y sign -n wg-fleet-register` signature over
+    # enrollment.registration_message(); proves the client owns host_key
+    host_key_signature: Optional[str] = None
 
 class RegisterResponse(BaseModel):
     status: str
@@ -96,6 +99,7 @@ async def register_client(
         raise HTTPException(status_code=403, detail=f"Fleet '{fleet_name}' no longer accepts registrations")
 
     site = host_key = None
+    host_key_proven = False
     if fleet_config.static:
         # Unauthenticated, so never used for a certificate or to take over a record here.
         # Kept so that when the machine later joins a fleet from fleets_url with its
@@ -113,17 +117,28 @@ async def register_client(
         if host_key is None:
             raise HTTPException(status_code=400, detail="host_key must be an ssh public key")
         site = body.site
+        if body.host_key_signature:
+            if not host_key_signature_valid(fleet_name, site, host_key, body.host_key_signature):
+                logger.warning(f"Registration refused: fleet={fleet_name}, site={site}, "
+                               f"source={request.client.host}: host_key_signature doesn't match host_key")
+                raise HTTPException(status_code=403, detail="host_key_signature doesn't match host_key")
+            host_key_proven = True
+        else:
+            logger.info(f"Registration without host_key_signature: fleet={fleet_name}, site={site}; "
+                        f"it can't take over a previous record or leave another fleet")
 
     # A machine that registers again (new WireGuard key after a reboot or VPN failure)
     # takes over its previous record's hostname, instead of getting "name--2" until the
-    # old record is pruned. Only the same host key at the same site can do that.
+    # old record is pruned. Only the same host key at the same site can do that, and
+    # only once the client proved it owns the key.
     previous = []
     # A machine that moved here from another fleet (e.g. from the setup fleet after
     # setup, or to another contest) is removed from that fleet right away, rather than
     # lingering in the hosts file, inventory and Prometheus until it's pruned. Only a
-    # token-checked registration can do that, never an unauthenticated static one.
+    # registration with a token and a proven host key can do that, never an
+    # unauthenticated static one.
     moved = []
-    if not fleet_config.static:
+    if host_key_proven:
         previous = db.query(Client).filter_by(
             fleet_id=fleet_name, site=site, host_key=host_key
         ).order_by(Client.timestamp.desc()).all()
