@@ -98,7 +98,7 @@ def interface_exists(interface: str) -> bool:
         True if interface exists, False otherwise
     """
     try:
-        run_command(['wg', 'show', interface])
+        run_command(['wg', 'show', interface], quiet=True)
         return True
     except CommandError:
         return False

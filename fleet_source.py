@@ -72,7 +72,7 @@ def verify_signature(data: bytes, signature: bytes, signers: List[str], signer_i
                 '-I', signer_id,
                 '-n', SIGNATURE_NAMESPACE,
                 '-s', str(sig_path),
-            ], input_data=data)
+            ], input_data=data, quiet=True)
             return True
         except CommandError:
             return False

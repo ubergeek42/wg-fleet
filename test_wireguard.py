@@ -108,3 +108,13 @@ def test_build_client_config_endpoint(endpoint_ip, expected):
     assert expected in config
     assert 'Address = fd00::1234/64' in config
     assert 'AllowedIPs = fd00::1/128' in config
+
+@patch('wireguard.run_command')
+def test_interface_exists_checks_quietly(mock_run_command):
+    """Test a missing interface is an answer, not an error to log (plan X1.2)"""
+    from command import CommandError
+    from wireguard import interface_exists
+    mock_run_command.side_effect = CommandError('Unable to access interface: No such device')
+
+    assert interface_exists('wgf12345678') is False
+    mock_run_command.assert_called_once_with(['wg', 'show', 'wgf12345678'], quiet=True)

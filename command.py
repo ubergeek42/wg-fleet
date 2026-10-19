@@ -11,7 +11,8 @@ class CommandError(Exception):
 def run_command(
     args: List[str],
     input_data: Optional[Union[str, bytes]] = None,
-    timeout: float = 10
+    timeout: float = 10,
+    quiet: bool = False
 ) -> str:
     """
     Execute command with error handling and logging.
@@ -22,6 +23,8 @@ def run_command(
             bytes are passed through unchanged, e.g. a file whose signature is checked.
         timeout: Seconds before the command is killed. Commands run on the event loop,
             so a hung command would otherwise freeze the whole server.
+        quiet: Log a failure at debug instead of error, for commands whose failure is an
+            expected answer (e.g. checking whether an interface exists)
 
     Returns:
         stdout as string
@@ -32,6 +35,7 @@ def run_command(
     logger.debug(f"Running command: {' '.join(args)}")
 
     binary = isinstance(input_data, bytes)
+    log = logger.debug if quiet else logger.error
     try:
         result = subprocess.run(
             args,
@@ -44,11 +48,11 @@ def run_command(
         stdout = result.stdout.decode(errors='replace') if binary else result.stdout
         return stdout.strip()
     except subprocess.TimeoutExpired as e:
-        logger.error(f"Command timed out after {timeout}s: {' '.join(args)}")
+        log(f"Command timed out after {timeout}s: {' '.join(args)}")
         raise CommandError(f"Command timed out after {timeout}s") from e
     except subprocess.CalledProcessError as e:
-        logger.error(f"Command failed: {' '.join(args)}")
-        logger.error(f"Exit code: {e.returncode}")
+        log(f"Command failed: {' '.join(args)}")
+        log(f"Exit code: {e.returncode}")
         stderr = e.stderr.decode(errors='replace') if binary else e.stderr
-        logger.error(f"Stderr: {stderr}")
+        log(f"Stderr: {stderr}")
         raise CommandError(f"Command failed: {stderr}") from e
