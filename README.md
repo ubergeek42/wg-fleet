@@ -320,7 +320,7 @@ sudo wg-quick up ./wg0.conf
 host key and have a hostname. It certifies that host key for
 `<hostname>.<fleet>.<domain>` (the name after deduplication) until the fleet's
 `valid_until`, signed by the host CA. Every ping returns it; it's re-signed only when the
-name or `valid_until` changes. Clients install it as their sshd `HostCertificate` when it
+name, `valid_until` or the host CA changes. Clients install it as their sshd `HostCertificate` when it
 differs from the one they have. Static fleets never get certificates, since anyone can
 register in them.
 
@@ -347,7 +347,8 @@ The host CA's public key, created in `/var/lib/wg-fleet/host_ca` on first start 
 key there, e.g. restored from a backup, is kept). Trust it with
 `@cert-authority *.icpcnet.internal <key>` in `known_hosts`, and give it to contestforge for
 configs' `ssh_host_ca_keys`. Back it up: a new CA means every `known_hosts` and config has to
-change.
+change. To replace it on purpose, move `host_ca` and `host_ca.pub` away and restart wg-fleet;
+machines get certificates from the new CA on their next ping.
 
 ### Re-registration
 

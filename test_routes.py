@@ -605,3 +605,24 @@ def test_shell_signature_verifies(host_key):
 
     assert host_key_signature_valid('bs26-ma', SITE, key, signature)
     assert not host_key_signature_valid('bs26-ma', 'Other/Site', key, signature)
+
+def test_host_certificate_reissued_when_ca_changes(url_fleet, mock_wg, host_key, host_ca_path, tmp_path):
+    """Test replacing the host CA (e.g. a fresh one for production) re-signs every certificate on the next ping"""
+    import host_ca
+    test_client, config, session_factory = url_fleet
+    host_ca.ensure_host_ca()
+    ip = enroll(test_client, host_key)
+    first = ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate']
+
+    # The old CA is backed up and removed, and wg-fleet restarts with a new one
+    host_ca_path.unlink()
+    host_ca_path.with_name('host_ca.pub').unlink()
+    new_ca = host_ca.ensure_host_ca()
+
+    second = ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate']
+    assert second != first
+    new_fingerprint = subprocess.run(['ssh-keygen', '-l', '-f', str(host_ca_path) + '.pub'],
+                                     capture_output=True, text=True, check=True).stdout.split()[1]
+    assert new_fingerprint in certificate_info(tmp_path, second)
+    # And it's stable again after that
+    assert ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate'] == second

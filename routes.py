@@ -188,6 +188,7 @@ async def register_client(
             client_record.host_certificate = reclaimed.host_certificate
             client_record.host_certificate_name = reclaimed.host_certificate_name
             client_record.host_certificate_valid_until = reclaimed.host_certificate_valid_until
+            client_record.host_certificate_ca = reclaimed.host_certificate_ca
         old_peers = [(old.fleet_id, old.public_key) for old in previous + moved]
         moved_from = [(old.fleet_id, old.hostname or old.assigned_ip) for old in moved]
         for old in previous + moved:
@@ -376,7 +377,8 @@ async def ping_client(
 
 def host_certificate_for(fleet_name: str, fleet_config, client_record: Client) -> Optional[str]:
     """
-    The client's host certificate, signing a new one if its name or validity changed.
+    The client's host certificate, signing a new one if its name, its validity or the
+    host CA changed.
 
     Every ping returns it, so a machine that rebooted (and kept its record and name)
     still gets one, and a renewal needs nothing special. Only fleets from fleets_url
@@ -391,10 +393,16 @@ def host_certificate_for(fleet_name: str, fleet_config, client_record: Client) -
         return None
     if fleet_config.valid_until <= datetime.now(UTC):
         return None
+    try:
+        ca_key = ' '.join(host_ca.public_key().split()[:2])
+    except FileNotFoundError:
+        logger.error("No host CA; can't sign host certificates")
+        return None
 
     if (client_record.host_certificate
             and client_record.host_certificate_name == client_record.hostname
-            and as_utc(client_record.host_certificate_valid_until) == fleet_config.valid_until):
+            and as_utc(client_record.host_certificate_valid_until) == fleet_config.valid_until
+            and client_record.host_certificate_ca == ca_key):
         return client_record.host_certificate
 
     principal = f"{client_record.hostname}.{fleet_name}.{app_config.domain}"
@@ -412,6 +420,7 @@ def host_certificate_for(fleet_name: str, fleet_config, client_record: Client) -
     client_record.host_certificate = certificate
     client_record.host_certificate_name = client_record.hostname
     client_record.host_certificate_valid_until = fleet_config.valid_until.astimezone(UTC).replace(tzinfo=None)
+    client_record.host_certificate_ca = ca_key
     logger.info(f"Signed host certificate for {principal}, valid until {fleet_config.valid_until}")
     return certificate
 

@@ -21,6 +21,7 @@ class Client(Base):
         host_certificate: Last host certificate issued for host_key
         host_certificate_name: The hostname that certificate is for
         host_certificate_valid_until: When that certificate expires (the fleet's valid_until)
+        host_certificate_ca: Public key ("<type> <base64>") of the CA that signed it
     """
     __tablename__ = 'clients'
 
@@ -36,6 +37,7 @@ class Client(Base):
     host_certificate = Column(String, nullable=True)
     host_certificate_name = Column(String, nullable=True)
     host_certificate_valid_until = Column(DateTime, nullable=True)
+    host_certificate_ca = Column(String, nullable=True)
 
     def __repr__(self):
         return f"<Client(fleet={self.fleet_id}, ip={self.assigned_ip}, hostname={self.hostname})>"
