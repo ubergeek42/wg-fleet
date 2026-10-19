@@ -433,3 +433,63 @@ def test_fleets_file_ignores_client_events(test_db, fleets_file_path):
                               session_factory=test_db))
 
     assert not fleets_file_path.exists()
+
+
+# End-to-end scenarios (contestforge's NEXT-STEPS checks)
+
+def test_fleet_back_before_teardown_keeps_its_addresses(test_db, mock_setup, fleets_file_path):
+    """Test a contest made a draft and published again keeps its interface, subnet and port"""
+    from hook_manager import trigger_hooks, HookContext
+    config = make_config()
+    apply_fleets(config, test_db, doc(('f', url_fleet(name='f'))), NOW)
+
+    apply_fleets(config, test_db, doc(revision=2), NOW)
+    trigger_hooks(HookContext(event_type=EventType.FLEETS_CHANGED, config=config, session_factory=test_db))
+    assert 'f' not in json.loads(fleets_file_path.read_text())['fleets']
+
+    # contestforge republishes it; even if its entry now said otherwise, the old addresses win
+    apply_fleets(config, test_db, doc(('f', url_fleet(name='f', port=51899, n=0x4299)), revision=3), NOW)
+    trigger_hooks(HookContext(event_type=EventType.FLEETS_CHANGED, config=config, session_factory=test_db))
+    assert (config.fleets['f'].subnet, config.fleets['f'].port) == ('fd00:a0a8:34d:4210::/64', 51830)
+    assert config.fleets['f'].removed is False
+    assert 'f' in json.loads(fleets_file_path.read_text())['fleets']
+    assert mock_setup.call_count == 1
+
+
+def test_fleet_back_after_teardown_is_set_up_again(test_db, mock_setup):
+    """Test a fleet that returns after it was torn down gets a fresh interface with contestforge's addresses"""
+    config = make_config()
+    removed_fleet(config, test_db, NOW)
+    with patch('fleet_registry.wireguard') as mock_wg:
+        mock_wg.interface_exists.return_value = False
+        assert retire_removed_fleets(config, test_db, NOW + timedelta(days=2))
+
+    apply_fleets(config, test_db, doc(('f', url_fleet(name='f')), revision=3), NOW + timedelta(days=2))
+
+    assert config.fleets['f'].removed is False
+    assert known_rows(test_db)['f'] == ('fd00:a0a8:34d:4210::/64', 51830, None)
+    assert mock_setup.call_count == 2
+
+
+def test_expired_fleet_keeps_existing_peers(test_db, mock_setup):
+    """Test expiry refuses newcomers but never cuts off a machine that's still connected"""
+    from pruning import prune_stale_clients_once
+    config = make_config()
+    apply_fleets(config, test_db, doc(('f', url_fleet(name='f', valid_until=NOW + timedelta(hours=1)))), NOW)
+    with test_db() as session:
+        session.add(Client(fleet_id='f', public_key='k', assigned_ip='fd00:a0a8:34d:4210::5',
+                           http_request_ip='1.2.3.4', hostname='t1', timestamp=datetime.now(UTC)))
+        session.commit()
+
+    later = NOW + timedelta(days=3)
+    apply_fleets(config, test_db, doc(('f', url_fleet(name='f', valid_until=NOW + timedelta(hours=1)))), later)
+    with patch('fleet_registry.wireguard') as mock_wg, patch('pruning.wireguard') as mock_prune_wg:
+        mock_wg.interface_exists.return_value = True
+        mock_wg.list_peers.return_value = [{'public_key': 'k'}]
+        mock_prune_wg.list_peers.return_value = [{'public_key': 'k', 'last_handshake': datetime.now(UTC)}]
+        prune_stale_clients_once(config, test_db)
+        assert retire_removed_fleets(config, test_db, later) is False
+
+    assert config.fleets['f'].removed is True
+    with test_db() as session:
+        assert session.query(Client).count() == 1

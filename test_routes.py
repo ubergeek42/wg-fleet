@@ -537,3 +537,15 @@ def test_static_registration_never_evicts(url_fleet, mock_wg, host_key):
 
     assert clients_by_fleet(session_factory) == [('bs26-ma', contest_ip), ('testfleet', 'fd00::99')]
     mock_wg.remove_peer.assert_not_called()
+
+def test_no_certificate_after_expiry(url_fleet, mock_wg, host_key):
+    """Test a certificate issued before valid_until isn't handed out (or renewed) after it"""
+    import host_ca
+    test_client, config, session_factory = url_fleet
+    host_ca.ensure_host_ca()
+    ip = enroll(test_client, host_key[1])
+    assert ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate']
+
+    config.fleets['bs26-ma'].valid_until = datetime.now(UTC) - timedelta(seconds=1)
+
+    assert ping(test_client, ip, 't101', fleet='bs26-ma').json() == {'status': 'ok'}

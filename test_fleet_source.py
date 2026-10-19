@@ -262,3 +262,17 @@ def test_load_cached_missing(source):
     fleet_source, bucket = source
     assert fleet_source.load_cached() is None
     assert fleet_source.document is None
+
+
+def test_database_reset_revision_is_accepted(source, signer, caplog):
+    """Test contestforge's revision after a database reset (max(stored + 1, unix time)) is accepted"""
+    import logging, time
+    fleet_source, bucket = source
+    bucket.publish(document(revision=int(time.time()) - 3600), signer)
+    fleet_source.fetch()
+
+    # The reset loses the stored revision; the next one is the current time, still higher
+    bucket.publish(document(revision=int(time.time())), signer)
+    with caplog.at_level(logging.INFO):
+        assert fleet_source.fetch() is not None
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

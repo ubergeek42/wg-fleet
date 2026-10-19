@@ -132,6 +132,13 @@ How they behave:
 - A fleet that leaves the file or passes its `valid_until` stops accepting registrations at
   once. Its interface stays up until its clients are pruned and `removed_fleet_grace` has
   passed, and is then removed along with its config file.
+- In the meantime, machines still connected keep their VPN: expiry never cuts off a running
+  machine. But the fleet leaves `/run/wg_fleets.json` (so its bastion user loses access), no
+  host certificate is issued or handed out past `valid_until`, and a machine that reboots
+  or loses its tunnel can't register again. Pruning only removes machines whose handshakes
+  stop, so a fleet whose machines stay on keeps its interface until they're switched off.
+- A fleet that comes back before it's torn down keeps its interface, subnet and port. One
+  that comes back after gets a new interface with the addresses in its fleets.json entry.
 
 ### Duration Format
 
