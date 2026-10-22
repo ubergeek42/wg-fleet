@@ -37,6 +37,35 @@
         tr:nth-child(even) {
             background: #f9f9f9;
         }
+        .conn {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        .conn-direct {
+            background: #d4edda;
+            color: #155724;
+        }
+        .conn-wstunnel {
+            background: #fff3cd;
+            color: #856404;
+        }
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+        th.sortable::after {
+            content: " \2195";
+            color: #999;
+        }
+        th.sortable[data-dir="asc"]::after {
+            content: " \25B2";
+            color: white;
+        }
+        th.sortable[data-dir="desc"]::after {
+            content: " \25BC";
+            color: white;
+        }
         .timestamp {
             color: #666;
             font-size: 0.9em;
@@ -99,16 +128,17 @@
     {% endif %}
 
     <h2>Active Clients ({{ clients|length }})</h2>
-    <table>
+    <table id="clients">
         <thead>
             <tr>
-                <th>Hostname</th>
-                <th>Site</th>
-                <th>Assigned IP</th>
-                <th>Public Key</th>
-                <th>Source IP</th>
-                <th>Registered At</th>
-                <th>Last Handshake</th>
+                <th class="sortable">Hostname</th>
+                <th class="sortable">Site</th>
+                <th class="sortable">Assigned IP</th>
+                <th class="sortable">Public Key</th>
+                <th class="sortable">Source IP</th>
+                <th class="sortable">Connection</th>
+                <th class="sortable">Registered At</th>
+                <th class="sortable">Last Handshake</th>
             </tr>
         </thead>
         <tbody>
@@ -119,11 +149,21 @@
                 <td>{{ client.assigned_ip }}</td>
                 <td>{{ client.public_key[:16] }}...</td>
                 <td>{{ client.http_request_ip }}</td>
-                <td class="timestamp">
+                <td>
+                    {% if not client.wg_endpoint %}
+                        N/A
+                    {% elif client.wg_endpoint|tunneled %}
+                        <span class="conn conn-wstunnel">wstunnel</span>
+                    {% else %}
+                        <span class="conn conn-direct">direct</span><br>
+                        <span style="color: #999; font-size: 0.85em;">{{ client.wg_endpoint }}</span>
+                    {% endif %}
+                </td>
+                <td class="timestamp" data-sort="{{ client.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}">
                     {{ client.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}<br>
                     <span style="color: #999; font-size: 0.85em;">({{ client.timestamp|humanize }})</span>
                 </td>
-                <td class="timestamp">
+                <td class="timestamp" data-sort="{{ client.wg_last_handshake.strftime('%Y-%m-%d %H:%M:%S') if client.wg_last_handshake else '' }}">
                     {% if client.wg_last_handshake %}
                         {{ client.wg_last_handshake.strftime('%Y-%m-%d %H:%M:%S') }}<br>
                         <span style="color: #999; font-size: 0.85em;">({{ client.wg_last_handshake|humanize }})</span>
@@ -135,5 +175,27 @@
         {% endfor %}
         </tbody>
     </table>
+    <script>
+        // Click a column header to sort by it; click again to reverse.
+        // Cells sort by their data-sort attribute if they have one, else their text.
+        document.querySelectorAll('#clients th.sortable').forEach((th, column) => {
+            th.addEventListener('click', () => {
+                const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+                document.querySelectorAll('#clients th.sortable').forEach(h => delete h.dataset.dir);
+                th.dataset.dir = dir;
+                const key = row => {
+                    const cell = row.cells[column];
+                    return cell.dataset.sort ?? cell.textContent.trim();
+                };
+                const tbody = document.querySelector('#clients tbody');
+                const rows = Array.from(tbody.rows);
+                rows.sort((a, b) => {
+                    const order = key(a).localeCompare(key(b), undefined, {numeric: true});
+                    return dir === 'asc' ? order : -order;
+                });
+                rows.forEach(row => tbody.appendChild(row));
+            });
+        });
+    </script>
 </body>
 </html>

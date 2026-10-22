@@ -196,6 +196,25 @@ def list_peers(interface: str) -> List[Dict]:
 
     return peers
 
+def endpoint_is_tunneled(endpoint: str) -> bool:
+    """
+    Whether a peer endpoint means the client came in through wstunnel.
+
+    wstunnel on the server forwards to the WireGuard port on localhost, so
+    every tunneled peer appears to come from a loopback address.
+
+    Args:
+        endpoint: Peer endpoint from `wg show`, e.g. '1.2.3.4:51820' or '[::1]:51820'
+
+    Returns:
+        True if the endpoint's host is a loopback address
+    """
+    host = endpoint.rsplit(':', 1)[0].strip('[]')
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 def get_server_public_key(interface: str) -> str:
     """
     Extract server's public key from interface.

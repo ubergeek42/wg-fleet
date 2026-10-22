@@ -626,3 +626,20 @@ def test_host_certificate_reissued_when_ca_changes(url_fleet, mock_wg, host_key,
     assert new_fingerprint in certificate_info(tmp_path, second)
     # And it's stable again after that
     assert ping(test_client, ip, 't101', fleet='bs26-ma').json()['host_certificate'] == second
+
+def test_dashboard_shows_connection_type(url_fleet, mock_wg, host_key):
+    """Test the fleet page tells a direct peer from one tunneled through wstunnel"""
+    test_client, config, session_factory = url_fleet
+    enroll(test_client, host_key)
+
+    mock_wg.list_peers.return_value = [
+        {'public_key': 'client_pub', 'endpoint': '23.117.92.130:53796', 'last_handshake': None}]
+    page = test_client.get('/fleet/bs26-ma').text
+    assert 'class="conn conn-direct"' in page and '23.117.92.130:53796' in page
+    assert 'class="conn conn-wstunnel"' not in page
+
+    mock_wg.list_peers.return_value = [
+        {'public_key': 'client_pub', 'endpoint': '127.0.0.1:40122', 'last_handshake': None}]
+    page = test_client.get('/fleet/bs26-ma').text
+    assert 'class="conn conn-wstunnel"' in page
+    assert '127.0.0.1:40122' not in page

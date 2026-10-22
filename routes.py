@@ -471,6 +471,7 @@ def humanize_timedelta(dt):
         return f"{days}d {hours}h ago"
 
 templates.env.filters['humanize'] = humanize_timedelta
+templates.env.filters['tunneled'] = wireguard.endpoint_is_tunneled
 
 @web_router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -509,10 +510,12 @@ async def fleet_detail(
             if client.public_key in wg_map:
                 peer = wg_map[client.public_key]
                 client.wg_last_handshake = peer['last_handshake']
+                client.wg_endpoint = peer.get('endpoint')
                 client.wg_rx_bytes = peer.get('rx_bytes', 0)
                 client.wg_tx_bytes = peer.get('tx_bytes', 0)
             else:
                 client.wg_last_handshake = None
+                client.wg_endpoint = None
     except Exception as e:
         logger.warning(f"Failed to fetch WireGuard stats: {e}")
 

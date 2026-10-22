@@ -118,3 +118,15 @@ def test_interface_exists_checks_quietly(mock_run_command):
 
     assert interface_exists('wgf12345678') is False
     mock_run_command.assert_called_once_with(['wg', 'show', 'wgf12345678'], quiet=True)
+
+@pytest.mark.parametrize('endpoint, expected', [
+    ('23.117.92.130:53796', False),
+    ('[2001:db8::1]:51820', False),
+    ('127.0.0.1:40122', True),
+    ('[::1]:40122', True),
+    ('not-an-ip:1', False),
+])
+def test_endpoint_is_tunneled(endpoint, expected):
+    """Test wstunnel peers are recognized by their loopback endpoint"""
+    from wireguard import endpoint_is_tunneled
+    assert endpoint_is_tunneled(endpoint) == expected
